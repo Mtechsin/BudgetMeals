@@ -1,0 +1,783 @@
+[
+  {
+    "title": "Baladi bread",
+    "emoji": "🍞",
+    "name": "Baladi bread",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "bag (5)",
+    "portionUnit": "loaf",
+    "portionsPerStockUnit": 5.0,
+    "defaultCostPerPortion": 5.0,
+    "description": "1 bag (5 loaves) = 25 EGP (5 EGP / loaf)",
+    "mealUsage": "Breakfast, Dinner",
+    "purchasePrice": 25.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Bakery"
+  },
+  {
+    "title": "Fino bread",
+    "emoji": "🥖",
+    "name": "Fino bread",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "bag (5)",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 5.0,
+    "defaultCostPerPortion": 2.5,
+    "description": "1 bag (5 fino) = 12.5 EGP (2.5 EGP / piece)",
+    "mealUsage": "Breakfast, Dinner",
+    "purchasePrice": 12.5,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Bakery"
+  },
+  {
+    "title": "Shami bread",
+    "emoji": "🫓",
+    "name": "Shami bread",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "bag (5)",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 5.0,
+    "defaultCostPerPortion": 3.0,
+    "description": "1 bag (5 shami) = 15 EGP (3 EGP / piece)",
+    "mealUsage": "Breakfast, Dinner",
+    "purchasePrice": 15.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Bakery"
+  },
+  {
+    "title": "Eggs",
+    "emoji": "🥚",
+    "name": "Eggs",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "carton (30)",
+    "portionUnit": "egg",
+    "portionsPerStockUnit": 30.0,
+    "defaultCostPerPortion": 5.5,
+    "description": "1 carton = 30 eggs (~5.5 EGP / egg · 165 EGP)",
+    "mealUsage": "Breakfast, Dinner",
+    "purchasePrice": 165.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Dairy & Eggs"
+  },
+  {
+    "title": "Cheese (Feta / White)",
+    "emoji": "🧀",
+    "name": "Cheese",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 20.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Rumi cheese",
+    "emoji": "🧀",
+    "name": "Rumi cheese",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "pack (250g)",
+    "portionUnit": "slice",
+    "portionsPerStockUnit": 10.0,
+    "defaultCostPerPortion": 12.0,
+    "description": "1 pack (250g) ≈ 10 slices (12 EGP / slice · 120 EGP)",
+    "mealUsage": "Breakfast, Dinner",
+    "purchasePrice": 120.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Dairy & Eggs"
+  },
+  {
+    "title": "Yogurt",
+    "emoji": "🥛",
+    "name": "Yogurt",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "pack (6)",
+    "portionUnit": "cup",
+    "portionsPerStockUnit": 6.0,
+    "defaultCostPerPortion": 7.0,
+    "description": "1 pack (6 cups) = 42 EGP (7 EGP / cup)",
+    "mealUsage": "Breakfast, Dinner, Snack",
+    "purchasePrice": 42.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Dairy & Eggs"
+  },
+  {
+    "title": "Milk",
+    "emoji": "🥛",
+    "name": "Milk",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "bottle (1L)",
+    "portionUnit": "cup",
+    "portionsPerStockUnit": 4.0,
+    "defaultCostPerPortion": 10.0,
+    "description": "1 bottle (1000ml) ≈ 4 cups (10 EGP / cup · 40 EGP)",
+    "mealUsage": "Breakfast, Snack",
+    "purchasePrice": 40.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Dairy & Eggs"
+  },
+  {
+    "title": "Sugar (grams)",
+    "emoji": "🍬",
+    "name": "Sugar (g)",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "g",
+    "portionsPerStockUnit": 1000.0,
+    "defaultCostPerPortion": 0.035,
+    "description": "1 kg = 1000 g (0.035 EGP / g · 35 EGP / kg)",
+    "mealUsage": "Tea, Coffee, Baking",
+    "purchasePrice": 35.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Sugar (spoon)",
+    "emoji": "🍬",
+    "name": "Sugar",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 10.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Egyptian Rice",
+    "emoji": "🍚",
+    "name": "Rice",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 200.0,
+      "spoonUnitName": "cup"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Flour",
+    "emoji": "🌾",
+    "name": "Flour",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "g",
+    "portionsPerStockUnit": 1000.0,
+    "defaultCostPerPortion": 0.025,
+    "description": "1 kg = 1000 g (0.025 EGP / g · 25 EGP / kg)",
+    "mealUsage": "Baking, Cooking",
+    "purchasePrice": 25.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Pasta / Macaroni",
+    "emoji": "🍝",
+    "name": "Pasta",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "pack (400g)",
+    "portionUnit": "portion",
+    "portionsPerStockUnit": 3.0,
+    "defaultCostPerPortion": 5.0,
+    "description": "1 Egyptian pack (400g) ≈ 3 portions (15 EGP)",
+    "mealUsage": "Lunch, Dinner",
+    "purchasePrice": 15.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Ful medames",
+    "emoji": "🧆",
+    "name": "Ful medames",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "bag",
+    "portionUnit": "portion",
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 10.0,
+    "description": "1 prepared cart bag / portion = 10 EGP",
+    "mealUsage": "Breakfast, Dinner",
+    "purchasePrice": 10.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Falafel (Taameya)",
+    "emoji": "🧆",
+    "name": "Falafel",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "bag (10)",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 10.0,
+    "defaultCostPerPortion": 3.5,
+    "description": "1 piece = 3.5 EGP (35 EGP / bag of 10)",
+    "mealUsage": "Breakfast, Dinner",
+    "purchasePrice": 35.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Lentils",
+    "emoji": "🥣",
+    "name": "Lentils",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "pack (500g)",
+    "portionUnit": "cup",
+    "portionsPerStockUnit": 2.5,
+    "defaultCostPerPortion": 12.0,
+    "description": "1 pack (500g) ≈ 2.5 cups (12 EGP / cup · 30 EGP)",
+    "mealUsage": "Lunch, Dinner",
+    "purchasePrice": 30.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Split fava",
+    "emoji": "🥣",
+    "name": "Split fava",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "pack (500g)",
+    "portionUnit": "portion",
+    "portionsPerStockUnit": 5.0,
+    "defaultCostPerPortion": 5.0,
+    "description": "1 pack (500g) ≈ 5 portions (25 EGP)",
+    "mealUsage": "Lunch",
+    "purchasePrice": 25.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Koshari",
+    "emoji": "🍲",
+    "name": "Koshari",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "portion",
+    "portionUnit": "portion",
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 30.0,
+    "description": "1 plate = 30 EGP",
+    "mealUsage": "Lunch",
+    "purchasePrice": 30.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Tuna",
+    "emoji": "🐟",
+    "name": "Tuna",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "can (140g)",
+    "portionUnit": "can",
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 40.0,
+    "description": "1 can (140g) = 40 EGP",
+    "mealUsage": "Lunch, Dinner",
+    "purchasePrice": 40.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Tomatoes",
+    "emoji": "🍅",
+    "name": "Tomatoes",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 6.0,
+    "defaultCostPerPortion": 3.0,
+    "description": "1 kg ≈ 6 tomatoes (~3 EGP / tomato · 18 EGP / kg)",
+    "mealUsage": "Any",
+    "purchasePrice": 18.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Cucumbers",
+    "emoji": "🥒",
+    "name": "Cucumbers",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 8.0,
+    "defaultCostPerPortion": 2.5,
+    "description": "1 kg ≈ 8 cucumbers (~2.5 EGP / cucumber · 20 EGP / kg)",
+    "mealUsage": "Any",
+    "purchasePrice": 20.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Potatoes",
+    "emoji": "🥔",
+    "name": "Potatoes",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 4.0,
+    "defaultCostPerPortion": 5.0,
+    "description": "1 kg ≈ 4 large potatoes (~5 EGP / potato · 20 EGP / kg)",
+    "mealUsage": "Lunch, Dinner",
+    "purchasePrice": 20.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Onions",
+    "emoji": "🧅",
+    "name": "Onions",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 6.0,
+    "defaultCostPerPortion": 3.0,
+    "description": "1 kg ≈ 6 onions (~3 EGP / onion · 18 EGP / kg)",
+    "mealUsage": "Lunch, Dinner",
+    "purchasePrice": 18.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Lemons",
+    "emoji": "🍋",
+    "name": "Lemons",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 16.0,
+    "defaultCostPerPortion": 1.5,
+    "description": "1 kg ≈ 16 lemons (~1.5 EGP / lemon · 24 EGP / kg)",
+    "mealUsage": "Any",
+    "purchasePrice": 24.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Bell pepper",
+    "emoji": "🫑",
+    "name": "Bell pepper",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 12.0,
+    "defaultCostPerPortion": 2.0,
+    "description": "1 kg ≈ 12 peppers (~2 EGP / pepper · 24 EGP / kg)",
+    "mealUsage": "Any",
+    "purchasePrice": 24.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Garlic",
+    "emoji": "🧄",
+    "name": "Garlic",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "head",
+    "portionUnit": "clove",
+    "portionsPerStockUnit": 10.0,
+    "defaultCostPerPortion": 0.5,
+    "description": "1 head ≈ 10 cloves (~0.5 EGP / clove · 5 EGP / head)",
+    "mealUsage": "Lunch, Dinner",
+    "purchasePrice": 5.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Fried onions",
+    "emoji": "🧅",
+    "name": "Fried onions",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 10.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Fresh fruit",
+    "emoji": "🍎",
+    "name": "Fruit",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "kg",
+    "portionUnit": "piece",
+    "portionsPerStockUnit": 5.0,
+    "defaultCostPerPortion": 7.0,
+    "description": "1 kg ≈ 5 fruits (~7 EGP / piece · 35 EGP / kg)",
+    "mealUsage": "Snack",
+    "purchasePrice": 35.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Salad mix",
+    "emoji": "🥗",
+    "name": "Salad",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "portion",
+    "portionUnit": "portion",
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 5.0,
+    "description": "1 portion = 5 EGP",
+    "mealUsage": "Any",
+    "purchasePrice": 5.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Pickles",
+    "emoji": "🥒",
+    "name": "Pickles",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "jar",
+    "portionUnit": "portion",
+    "portionsPerStockUnit": 10.0,
+    "defaultCostPerPortion": 3.0,
+    "description": "1 jar ≈ 10 portions (30 EGP)",
+    "mealUsage": "Any",
+    "purchasePrice": 30.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Produce"
+  },
+  {
+    "title": "Cooking Oil",
+    "emoji": "🫒",
+    "name": "Oil",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 14.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Ghee / Butter",
+    "emoji": "🧈",
+    "name": "Ghee",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 15.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Tahina",
+    "emoji": "🥄",
+    "name": "Tahina",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 15.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Jam",
+    "emoji": "🍓",
+    "name": "Jam",
+    "category": "FOOD_FRESH",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 20.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Pure Honey",
+    "emoji": "🍯",
+    "name": "Honey",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 20.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Halawa",
+    "emoji": "🍯",
+    "name": "Halawa",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "pack (250g)",
+    "portionUnit": "portion",
+    "portionsPerStockUnit": 6.0,
+    "defaultCostPerPortion": 5.0,
+    "description": "1 pack (250g) ≈ 6 portions (30 EGP)",
+    "mealUsage": "Breakfast",
+    "purchasePrice": 30.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Spreads & Oils"
+  },
+  {
+    "title": "Tomato sauce",
+    "emoji": "🥫",
+    "name": "Tomato sauce",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 30.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Black Tea",
+    "emoji": "☕",
+    "name": "Tea",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 3.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Coffee / Nescafe",
+    "emoji": "☕",
+    "name": "Coffee",
+    "category": "FOOD_STAPLE",
+    "measurement": {
+      "type": "spoons",
+      "gramsPerSpoon": 5.0,
+      "spoonUnitName": "spoon"
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Chips",
+    "emoji": "🍟",
+    "name": "Chips",
+    "category": "SNACK",
+    "measurement": {
+      "type": "tiered",
+      "sizes": []
+    },
+    "stockUnit": null,
+    "portionUnit": null,
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 0.0,
+    "description": "",
+    "mealUsage": "Any",
+    "purchasePrice": null,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Staples"
+  },
+  {
+    "title": "Biscuits",
+    "emoji": "🍪",
+    "name": "Biscuits",
+    "category": "SNACK",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "box (12)",
+    "portionUnit": "pack",
+    "portionsPerStockUnit": 12.0,
+    "defaultCostPerPortion": 5.0,
+    "description": "1 box (12 packs) = 60 EGP (5 EGP / pack)",
+    "mealUsage": "Snack",
+    "purchasePrice": 60.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Drinks & Snacks"
+  },
+  {
+    "title": "Soda",
+    "emoji": "🥤",
+    "name": "Soda",
+    "category": "SNACK",
+    "measurement": {
+      "type": "standard"
+    },
+    "stockUnit": "can",
+    "portionUnit": "can",
+    "portionsPerStockUnit": 1.0,
+    "defaultCostPerPortion": 15.0,
+    "description": "1 can = 15 EGP",
+    "mealUsage": "Snack",
+    "purchasePrice": 15.0,
+    "purchaseQuantity": 1.0,
+    "menuCategory": "Drinks & Snacks"
+  }
+]
