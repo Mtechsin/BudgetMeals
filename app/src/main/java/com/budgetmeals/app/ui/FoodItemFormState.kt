@@ -11,7 +11,6 @@ import com.budgetmeals.app.data.ItemCategory
 import com.budgetmeals.app.data.TieredSize
 import java.util.UUID
 
-
 enum class MeasurementMode(val label: String) {
     STANDARD("Standard"),
     SPOONS("Spoons → Grams"),
@@ -83,8 +82,13 @@ class FoodItemFormState(
     var mediumPrice by mutableStateOf(initialSizes.firstOrNull { it.name.equals("Medium", ignoreCase = true) }?.price?.let { if (it == 0.0) "" else it.cleanNumber() } ?: "15")
     var largePrice by mutableStateOf(initialSizes.firstOrNull { it.name.equals("Large", ignoreCase = true) }?.price?.let { if (it == 0.0) "" else it.cleanNumber() } ?: "20")
 
-    val initialContainerGrams = if (initialSpoons != null && (existing?.portionsPerStockUnit ?: 0.0) > 0) {
-        (existing!!.portionsPerStockUnit * initialSpoons.gramsPerSpoon).cleanNumber()
+    val initialPortionsPerStockUnit = existing?.portionsPerStockUnit
+    val initialContainerGrams = if (
+        initialSpoons != null &&
+        initialPortionsPerStockUnit != null &&
+        initialPortionsPerStockUnit > 0.0
+    ) {
+        (initialPortionsPerStockUnit * initialSpoons.gramsPerSpoon).cleanNumber()
     } else if (existing?.stockUnit?.equals("kg", ignoreCase = true) == true) {
         "1000"
     } else {

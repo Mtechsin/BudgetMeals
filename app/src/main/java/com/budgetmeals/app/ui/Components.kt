@@ -1,11 +1,9 @@
 package com.budgetmeals.app.ui
 
-import com.budgetmeals.app.ui.icons.AppIcons
-
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,31 +56,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.semantics.ProgressBarRangeInfo
-import androidx.compose.ui.semantics.progressBarRangeInfo
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.budgetmeals.app.data.BatchType
 import com.budgetmeals.app.data.MealTemplate
 import com.budgetmeals.app.data.MealType
-import com.budgetmeals.app.data.BatchType
 import com.budgetmeals.app.data.StockItem
 import com.budgetmeals.app.state.BudgetMath
-import com.budgetmeals.app.ui.theme.extendedColors
+import com.budgetmeals.app.ui.icons.AppIcons
 import com.budgetmeals.app.ui.theme.Motion
+import com.budgetmeals.app.ui.theme.extendedColors
 import java.util.Locale
-
 
 @Composable
 fun ScreenHeader(
     title: String,
+    modifier: Modifier = Modifier,
     subtitle: String? = null,
     onBack: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
     action: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -114,9 +112,9 @@ fun ScreenHeader(
 @Composable
 fun SectionHeader(
     title: String,
+    modifier: Modifier = Modifier,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -347,10 +345,10 @@ fun ChipLabel(
 @Composable
 fun TagChip(
     text: String,
+    modifier: Modifier = Modifier,
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
     leadingIcon: ImageVector? = null,
-    modifier: Modifier = Modifier,
 ) {
     val containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else cardSurfaceColor()
     val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
@@ -529,10 +527,10 @@ fun ProgressBar(
 @Composable
 fun StockProgressRow(
     item: StockItem,
+    modifier: Modifier = Modifier,
     catalogLabel: String? = null,
     onClick: () -> Unit,
     onLogUsage: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val low = item.isLow
     val progress = item.remainingPercent.toFloat()

@@ -1,8 +1,8 @@
 package com.budgetmeals.app.data
 
+import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.UUID
 
 object FoodCatalogJsonCodec {
     const val FORMAT = "budgetmeals.food-catalog"
@@ -310,9 +310,9 @@ Do not change ids for items that already exist. Do not wrap JSON in markdown."""
                         )
                     }
                 } else {
-                    val value = array.opt(index)
-                    if (value is Number && value.toDouble() >= 0.0) {
-                        add(FoodPriceOption("Option ${index + 1}", value.toDouble()))
+                    val price = (array.opt(index) as? Number)?.toDouble()
+                    if (price != null && price.isFinite() && price >= 0.0) {
+                        add(FoodPriceOption("Option ${index + 1}", price))
                     }
                 }
             }

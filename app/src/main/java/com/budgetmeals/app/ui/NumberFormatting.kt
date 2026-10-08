@@ -2,8 +2,10 @@ package com.budgetmeals.app.ui
 
 import java.util.Locale
 
-fun String.asDouble(): Double = trim().normalizeNumber().toDoubleOrNull()
-    ?.takeIf { it.isFinite() } ?: 0.0
+fun String.asDouble(): Double = asDoubleOrNull() ?: 0.0
+
+internal fun String.asDoubleOrNull(): Double? = trim().normalizeNumber().toDoubleOrNull()
+    ?.takeIf { it.isFinite() }
 
 private fun String.normalizeNumber(): String = map { character ->
     when {

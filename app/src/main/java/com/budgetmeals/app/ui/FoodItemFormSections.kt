@@ -1,8 +1,7 @@
 package com.budgetmeals.app.ui
 
-import com.budgetmeals.app.ui.icons.AppIcons
-
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
@@ -23,15 +21,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.budgetmeals.app.state.BudgetMath
-
+import com.budgetmeals.app.ui.icons.AppIcons
 
 @Composable
 fun QuickSelectionRow(
@@ -251,7 +247,19 @@ fun SpoonJarSection(
         QuickSelectionRow(label = "Container:", selected = container, options = listOf("jar", "tub", "bottle", "kg", "pack", "can"), onSelect = onContainerChange)
         QuickSelectionRow(label = "Net weight:", selected = containerGrams, options = listOf("200", "340", "380", "500", "700", "1000"), onSelect = onContainerGramsChange)
     }
-    FoodKindSummary("1 $container (${containerGrams.ifBlank { "380" }}g) ≈ ${(containerGrams.trim().replace(',', '.').toDoubleOrNull() ?: 0.0).let { jg -> (gramsPerSpoon.trim().replace(',', '.').toDoubleOrNull() ?: 10.0).let { gps -> if (gps > 0) (jg / gps).let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } else "1" } }} ${spoonUnit}s · ${com.budgetmeals.app.state.BudgetMath.money(perSpoon.trim().replace(',', '.').toDoubleOrNull() ?: 0.0)} / $spoonUnit", icon = AppIcons.Flatware)
+    val netWeightLabel = containerGrams.ifBlank { "380" }
+    val netWeightGrams = netWeightLabel.asDouble()
+    val gramsPerSpoonValue = gramsPerSpoon.asDoubleOrNull() ?: 10.0
+    val portionsPerContainer = if (gramsPerSpoonValue > 0.0) {
+        (netWeightGrams / gramsPerSpoonValue).cleanNumber()
+    } else {
+        "1"
+    }
+    val pricePerSpoon = BudgetMath.money(perSpoon.asDouble())
+    FoodKindSummary(
+        "1 $container (${netWeightLabel}g) ≈ $portionsPerContainer ${spoonUnit}s · $pricePerSpoon / $spoonUnit",
+        icon = AppIcons.Flatware,
+    )
 }
 
 @Composable

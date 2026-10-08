@@ -4,6 +4,7 @@
 build/
 app/build/
 local.properties
+.signing/
 *.iml
 .externalNativeBuild/
 .cxx/

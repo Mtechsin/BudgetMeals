@@ -2,401 +2,39 @@ package com.budgetmeals.app.data
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.budgetmeals.app.state.BudgetMath
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.Locale
 import java.util.UUID
-import com.budgetmeals.app.state.BudgetMath
-
-
-    internal fun parseUsageHistory(value: String): List<Double> {
-        if (value.isBlank()) return emptyList()
-        return value.split(',').mapNotNull { part ->
-            val trimmed = part.trim()
-            if (trimmed.contains(':')) {
-                trimmed.split(':').getOrNull(1)?.toDoubleOrNull()
-            } else {
-                trimmed.toDoubleOrNull()
-            }
-        }
-    }
-
-    internal fun parseDatedUsage(value: String, defaultDate: LocalDate = LocalDate.now()): List<DatedUsage> {
-        if (value.isBlank()) return emptyList()
-        return value.split(',').mapNotNull { part ->
-            val trimmed = part.trim()
-            if (trimmed.isEmpty()) return@mapNotNull null
-            if (trimmed.contains(':')) {
-                val pieces = trimmed.split(':')
-                val date = runCatching { LocalDate.parse(pieces[0]) }.getOrNull() ?: defaultDate
-                val amount = pieces.getOrNull(1)?.toDoubleOrNull() ?: return@mapNotNull null
-                DatedUsage(date, amount, pieces.getOrNull(2)?.takeIf { it.isNotBlank() })
-            } else {
-                val amount = trimmed.toDoubleOrNull() ?: return@mapNotNull null
-                DatedUsage(defaultDate, amount)
-            }
-        }
-    }
-
-    internal inline fun <reified T : Enum<T>> enumValueOrDefault(value: String, default: T): T =
-        runCatching { enumValueOf<T>(value) }.getOrDefault(default)
-
-    internal fun Cursor.optionalDouble(column: String): Double? {
-        val index = getColumnIndex(column)
-        if (index < 0 || isNull(index)) return null
-        return getDouble(index)
-    }
-
-    internal fun Cursor.optionalString(column: String): String? {
-        val index = getColumnIndex(column)
-        if (index < 0 || isNull(index)) return null
-        return getString(index)
-    }
-
-    internal fun Cursor.optionalBoolean(column: String, default: Boolean): Boolean {
-        val index = getColumnIndex(column)
-        if (index < 0 || isNull(index)) return default
-        return getInt(index) == 1
-    }
-
-
-/** Reads the catalog item on the cursor's current row. Callers must position the cursor first. */
-internal fun readFoodCatalog(cursor: Cursor): FoodCatalogItem? {
-    if (cursor.isBeforeFirst || cursor.isAfterLast) return null
-    return FoodCatalogItem(
-        id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-        name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-        category = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("category")), ItemCategory.FOOD_FRESH),
-        stockUnit = cursor.getString(cursor.getColumnIndexOrThrow("stock_unit")),
-        portionUnit = cursor.getString(cursor.getColumnIndexOrThrow("portion_unit")),
-        portionsPerStockUnit = cursor.getDouble(cursor.getColumnIndexOrThrow("portions_per_stock_unit")).coerceAtLeast(0.0001),
-        defaultCostPerPortion = cursor.getDouble(cursor.getColumnIndexOrThrow("default_cost_per_portion")).coerceAtLeast(0.0),
-        notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")),
-        purchasePrice = cursor.optionalDouble("purchase_price"),
-        purchaseQuantity = cursor.optionalDouble("purchase_quantity"),
-        purchaseUnit = cursor.optionalString("purchase_unit"),
-        mealUsage = cursor.optionalString("meal_usage").orEmpty(),
-        priceOptions = FoodCatalogJsonCodec.decodePriceOptions(cursor.optionalString("price_options_json").orEmpty()),
-        priceKnown = cursor.optionalBoolean("price_known", true),
-        conversionKnown = cursor.optionalBoolean("conversion_known", true),
-    )
-}
-
-internal fun readShopping(cursor: Cursor): ShoppingItem {
-    return ShoppingItem(
-        id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-        name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-        quantity = cursor.getDouble(cursor.getColumnIndexOrThrow("quantity")),
-        unit = cursor.getString(cursor.getColumnIndexOrThrow("unit")),
-        estimatedPrice = cursor.getDouble(cursor.getColumnIndexOrThrow("estimated_price")),
-        category = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("category")), ItemCategory.OTHER),
-        isChecked = cursor.getInt(cursor.getColumnIndexOrThrow("is_checked")) == 1,
-        createdDate = LocalDate.ofEpochDay(cursor.getLong(cursor.getColumnIndexOrThrow("created_date"))),
-        sourceItemId = cursor.getString(cursor.getColumnIndexOrThrow("source_item_id")),
-        note = cursor.getString(cursor.getColumnIndexOrThrow("note")),
-        purchaseExpenseId = cursor.optionalString("purchase_expense_id"),
-        purchaseStockId = cursor.optionalString("purchase_stock_id"),
-        priceKnown = cursor.optionalBoolean("price_known", true),
-    )
-}
 
 abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
-fun loadSnapshot(settings: BudgetSettings): AppSnapshot {
+    fun loadSnapshot(settings: BudgetSettings, today: LocalDate = LocalDate.now()): AppSnapshot {
         val db = readableDatabase
-        val categories = db.query("categories", null, null, null, null, null, "sort_order ASC, name ASC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val nameIdx = cursor.getColumnIndexOrThrow("name")
-            val iconIdx = cursor.getColumnIndexOrThrow("icon")
-            val monthlyBudgetIdx = cursor.getColumnIndexOrThrow("monthly_budget")
-            val isFoodIdx = cursor.getColumnIndexOrThrow("is_food")
-            val isCustomIdx = cursor.getColumnIndexOrThrow("is_custom")
-            val sortOrderIdx = cursor.getColumnIndexOrThrow("sort_order")
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        ExpenseCategory(
-                            id = cursor.getString(idIdx),
-                            name = cursor.getString(nameIdx),
-                            icon = cursor.getString(iconIdx),
-                            monthlyBudget = cursor.getDouble(monthlyBudgetIdx),
-                            isFood = cursor.getInt(isFoodIdx) == 1,
-                            isCustom = cursor.getInt(isCustomIdx) == 1,
-                            sortOrder = cursor.getInt(sortOrderIdx),
-                        ),
-                    )
-                }
-            }
-        }
-        val foodCatalog = db.query("food_catalog", null, null, null, null, null, "name COLLATE NOCASE ASC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val nameIdx = cursor.getColumnIndexOrThrow("name")
-            val categoryIdx = cursor.getColumnIndexOrThrow("category")
-            val stockUnitIdx = cursor.getColumnIndexOrThrow("stock_unit")
-            val portionUnitIdx = cursor.getColumnIndexOrThrow("portion_unit")
-            val portionsPerStockUnitIdx = cursor.getColumnIndexOrThrow("portions_per_stock_unit")
-            val defaultCostPerPortionIdx = cursor.getColumnIndexOrThrow("default_cost_per_portion")
-            val notesIdx = cursor.getColumnIndexOrThrow("notes")
-            val purchasePriceIdx = cursor.getColumnIndex("purchase_price")
-            val purchaseQuantityIdx = cursor.getColumnIndex("purchase_quantity")
-            val purchaseUnitIdx = cursor.getColumnIndex("purchase_unit")
-            val mealUsageIdx = cursor.getColumnIndex("meal_usage")
-            val priceOptionsIdx = cursor.getColumnIndex("price_options_json")
-            val priceKnownIdx = cursor.getColumnIndex("price_known")
-            val conversionKnownIdx = cursor.getColumnIndex("conversion_known")
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        FoodCatalogItem(
-                            id = cursor.getString(idIdx),
-                            name = cursor.getString(nameIdx),
-                            category = enumValueOrDefault(cursor.getString(categoryIdx), ItemCategory.FOOD_FRESH),
-                            stockUnit = cursor.getString(stockUnitIdx),
-                            portionUnit = cursor.getString(portionUnitIdx),
-                            portionsPerStockUnit = cursor.getDouble(portionsPerStockUnitIdx).coerceAtLeast(0.0001),
-                            defaultCostPerPortion = cursor.getDouble(defaultCostPerPortionIdx).coerceAtLeast(0.0),
-                            notes = cursor.getString(notesIdx),
-                            purchasePrice = if (purchasePriceIdx >= 0 && !cursor.isNull(purchasePriceIdx)) cursor.getDouble(purchasePriceIdx) else null,
-                            purchaseQuantity = if (purchaseQuantityIdx >= 0 && !cursor.isNull(purchaseQuantityIdx)) cursor.getDouble(purchaseQuantityIdx) else null,
-                            purchaseUnit = if (purchaseUnitIdx >= 0 && !cursor.isNull(purchaseUnitIdx)) cursor.getString(purchaseUnitIdx) else null,
-                            mealUsage = if (mealUsageIdx >= 0 && !cursor.isNull(mealUsageIdx)) cursor.getString(mealUsageIdx) else "",
-                            priceOptions = FoodCatalogJsonCodec.decodePriceOptions(if (priceOptionsIdx >= 0 && !cursor.isNull(priceOptionsIdx)) cursor.getString(priceOptionsIdx) else ""),
-                            priceKnown = if (priceKnownIdx < 0 || cursor.isNull(priceKnownIdx)) true else cursor.getInt(priceKnownIdx) == 1,
-                            conversionKnown = if (conversionKnownIdx < 0 || cursor.isNull(conversionKnownIdx)) true else cursor.getInt(conversionKnownIdx) == 1,
-                        ),
-                    )
-                }
-            }
-        }
-        val stock = db.query("stock", null, null, null, null, null, "purchase_date DESC, name ASC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val nameIdx = cursor.getColumnIndexOrThrow("name")
-            val categoryIdx = cursor.getColumnIndexOrThrow("category")
-            val unitIdx = cursor.getColumnIndexOrThrow("unit")
-            val totalQuantityIdx = cursor.getColumnIndexOrThrow("total_quantity")
-            val totalPriceIdx = cursor.getColumnIndexOrThrow("total_price")
-            val purchaseDateIdx = cursor.getColumnIndexOrThrow("purchase_date")
-            val expiryDateIdx = cursor.getColumnIndexOrThrow("expiry_date")
-            val batchTypeIdx = cursor.getColumnIndexOrThrow("batch_type")
-            val usagePerDayIdx = cursor.getColumnIndexOrThrow("usage_per_day")
-            val consumedQuantityIdx = cursor.getColumnIndexOrThrow("consumed_quantity")
-            val usageHistoryIdx = cursor.getColumnIndexOrThrow("usage_history")
-            val notesIdx = cursor.getColumnIndexOrThrow("notes")
-            val catalogIdIdx = cursor.getColumnIndexOrThrow("catalog_id")
-            val packageLabelIdx = cursor.getColumnIndexOrThrow("package_label")
-            val packageSizeIdx = cursor.getColumnIndexOrThrow("package_size")
-            val conversionKnownIdx = cursor.getColumnIndexOrThrow("conversion_known")
-            val linkedExpenseIdx = cursor.getColumnIndex("linked_expense_id")
-            buildList {
-                while (cursor.moveToNext()) {
-                    val history = cursor.getString(usageHistoryIdx)
-                    val purchaseDate = LocalDate.ofEpochDay(cursor.getLong(purchaseDateIdx))
-                    add(
-                        StockItem(
-                            id = cursor.getString(idIdx),
-                            name = cursor.getString(nameIdx),
-                            category = enumValueOrDefault(cursor.getString(categoryIdx), ItemCategory.OTHER),
-                            unit = cursor.getString(unitIdx),
-                            totalQuantity = cursor.getDouble(totalQuantityIdx),
-                            totalPrice = cursor.getDouble(totalPriceIdx),
-                            purchaseDate = purchaseDate,
-                            expiryDate = cursor.getLong(expiryDateIdx).takeIf { it > 0L }?.let(LocalDate::ofEpochDay),
-                            batchType = enumValueOrDefault(cursor.getString(batchTypeIdx), BatchType.CUSTOM),
-                            estimatedUsagePerDay = cursor.getDouble(usagePerDayIdx),
-                            consumedQuantity = cursor.getDouble(consumedQuantityIdx),
-                            usageHistory = parseUsageHistory(history),
-                            datedUsageHistory = parseDatedUsage(history, purchaseDate),
-                            notes = cursor.getString(notesIdx),
-                            catalogId = cursor.getString(catalogIdIdx),
-                            linkedExpenseId = if (linkedExpenseIdx >= 0) cursor.getString(linkedExpenseIdx) else null,
-                            packageLabel = cursor.getString(packageLabelIdx).orEmpty(),
-                            packageSize = cursor.getDouble(packageSizeIdx),
-                            conversionKnown = cursor.getInt(conversionKnownIdx) != 0,
-                        ),
-                    )
-                }
-            }
-        }
-        val expenses = loadExpenses()
-        val templates = db.query("meal_templates", null, null, null, null, null, "meal_type ASC, cost ASC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val nameIdx = cursor.getColumnIndexOrThrow("name")
-            val mealTypeIdx = cursor.getColumnIndexOrThrow("meal_type")
-            val costIdx = cursor.getColumnIndexOrThrow("cost")
-            val isRecurringIdx = cursor.getColumnIndexOrThrow("is_recurring")
-            val dayOfWeekIdx = cursor.getColumnIndexOrThrow("day_of_week")
-            val notesIdx = cursor.getColumnIndexOrThrow("notes")
-            val isCustomIdx = cursor.getColumnIndexOrThrow("is_custom")
-            val componentsJsonIdx = cursor.getColumnIndexOrThrow("components_json")
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        MealTemplate(
-                            id = cursor.getString(idIdx),
-                            name = cursor.getString(nameIdx),
-                            mealType = enumValueOrDefault(cursor.getString(mealTypeIdx), MealType.SNACK),
-                            cost = cursor.getDouble(costIdx),
-                            isRecurring = cursor.getInt(isRecurringIdx) == 1,
-                            dayOfWeek = cursor.getString(dayOfWeekIdx)?.let { dayValue ->
-                                runCatching { java.time.DayOfWeek.valueOf(dayValue) }.getOrNull()
-                            },
-                            notes = cursor.getString(notesIdx),
-                            isCustom = cursor.getInt(isCustomIdx) == 1,
-                            components = MealDataCodec.decodeComponents(cursor.getString(componentsJsonIdx)),
-                        ),
-                    )
-                }
-            }
-        }
-        val mealLogs = db.query("meal_logs", null, null, null, null, null, "date DESC, actual_time DESC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val dateIdx = cursor.getColumnIndexOrThrow("date")
-            val mealTypeIdx = cursor.getColumnIndexOrThrow("meal_type")
-            val templateIdIdx = cursor.getColumnIndexOrThrow("template_id")
-            val nameIdx = cursor.getColumnIndexOrThrow("name")
-            val costIdx = cursor.getColumnIndexOrThrow("cost")
-            val actualTimeIdx = cursor.getColumnIndexOrThrow("actual_time")
-            val consumedCostIdx = cursor.getColumnIndexOrThrow("consumed_cost")
-            val foodsIdx = cursor.getColumnIndexOrThrow("foods")
-            val statusIdx = cursor.getColumnIndexOrThrow("status")
-            val componentsJsonIdx = cursor.getColumnIndexOrThrow("components_json")
-            val zone = java.time.ZoneId.systemDefault()
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        MealLog(
-                            id = cursor.getString(idIdx),
-                            date = LocalDate.ofEpochDay(cursor.getLong(dateIdx)),
-                            mealType = enumValueOrDefault(cursor.getString(mealTypeIdx), MealType.SNACK),
-                            templateId = cursor.getString(templateIdIdx),
-                            name = cursor.getString(nameIdx),
-                            cost = cursor.getDouble(costIdx),
-                            actualTime = java.time.Instant.ofEpochSecond(cursor.getLong(actualTimeIdx))
-                                .atZone(zone)
-                                .toLocalDateTime(),
-                            consumedCost = cursor.getDouble(consumedCostIdx),
-                            foods = cursor.getString(foodsIdx),
-                            status = enumValueOrDefault(cursor.getString(statusIdx), MealStatus.EATEN),
-                            components = MealDataCodec.decodeComponents(cursor.getString(componentsJsonIdx)),
-                        ),
-                    )
-                }
-            }
-        }
-        val shopping = db.query("shopping", null, null, null, null, null, "is_checked ASC, created_date DESC, name ASC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val nameIdx = cursor.getColumnIndexOrThrow("name")
-            val quantityIdx = cursor.getColumnIndexOrThrow("quantity")
-            val unitIdx = cursor.getColumnIndexOrThrow("unit")
-            val estimatedPriceIdx = cursor.getColumnIndexOrThrow("estimated_price")
-            val categoryIdx = cursor.getColumnIndexOrThrow("category")
-            val isCheckedIdx = cursor.getColumnIndexOrThrow("is_checked")
-            val createdDateIdx = cursor.getColumnIndexOrThrow("created_date")
-            val sourceItemIdIdx = cursor.getColumnIndexOrThrow("source_item_id")
-            val noteIdx = cursor.getColumnIndexOrThrow("note")
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        ShoppingItem(
-                            id = cursor.getString(idIdx),
-                            name = cursor.getString(nameIdx),
-                            quantity = cursor.getDouble(quantityIdx),
-                            unit = cursor.getString(unitIdx),
-                            estimatedPrice = cursor.getDouble(estimatedPriceIdx),
-                            category = enumValueOrDefault(cursor.getString(categoryIdx), ItemCategory.OTHER),
-                            isChecked = cursor.getInt(isCheckedIdx) == 1,
-                            createdDate = LocalDate.ofEpochDay(cursor.getLong(createdDateIdx)),
-                            sourceItemId = cursor.getString(sourceItemIdIdx),
-                            note = cursor.getString(noteIdx),
-                        ),
-                    )
-                }
-            }
-        }
-        val spares = db.query("spares", null, null, null, null, null, "date ASC, rowid ASC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val dateIdx = cursor.getColumnIndexOrThrow("date")
-            val amountIdx = cursor.getColumnIndexOrThrow("amount")
-            val reasonIdx = cursor.getColumnIndexOrThrow("reason")
-            val categoryIdx = cursor.getColumnIndexOrThrow("category")
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        SparesTransaction(
-                            id = cursor.getString(idIdx),
-                            date = LocalDate.ofEpochDay(cursor.getLong(dateIdx)),
-                            amount = cursor.getDouble(amountIdx),
-                            reason = cursor.getString(reasonIdx),
-                            category = cursor.getString(categoryIdx),
-                        ),
-                    )
-                }
-            }
-        }
-        val dayPlans = db.query("day_plans", null, null, null, null, null, "date ASC, meal_type ASC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val dateIdx = cursor.getColumnIndexOrThrow("date")
-            val mealTypeIdx = cursor.getColumnIndexOrThrow("meal_type")
-            val templateIdIdx = cursor.getColumnIndexOrThrow("template_id")
-            val nameIdx = cursor.getColumnIndexOrThrow("name")
-            val costIdx = cursor.getColumnIndexOrThrow("cost")
-            val foodsIdx = cursor.getColumnIndexOrThrow("foods")
-            val componentsJsonIdx = cursor.getColumnIndexOrThrow("components_json")
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        DailyMealPlan(
-                            id = cursor.getString(idIdx),
-                            date = LocalDate.ofEpochDay(cursor.getLong(dateIdx)),
-                            mealType = enumValueOrDefault(cursor.getString(mealTypeIdx), MealType.SNACK),
-                            templateId = cursor.getString(templateIdIdx),
-                            name = cursor.getString(nameIdx),
-                            cost = cursor.getDouble(costIdx),
-                            foods = cursor.getString(foodsIdx),
-                            components = MealDataCodec.decodeComponents(cursor.getString(componentsJsonIdx)),
-                        ),
-                    )
-                }
-            }
-        }
-        val dayClosures = db.query("day_closures", null, null, null, null, null, "date DESC").use { cursor ->
-            val dateIdx = cursor.getColumnIndexOrThrow("date")
-            val closedAtIdx = cursor.getColumnIndexOrThrow("closed_at")
-            val plannedCostIdx = cursor.getColumnIndexOrThrow("planned_cost")
-            val consumedCostIdx = cursor.getColumnIndexOrThrow("consumed_cost")
-            val leftoverCostIdx = cursor.getColumnIndexOrThrow("leftover_cost")
-            val skippedCostIdx = cursor.getColumnIndexOrThrow("skipped_cost")
-            val zone = java.time.ZoneId.systemDefault()
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        DayClosure(
-                            date = LocalDate.ofEpochDay(cursor.getLong(dateIdx)),
-                            closedAt = java.time.Instant.ofEpochSecond(cursor.getLong(closedAtIdx))
-                                .atZone(zone)
-                                .toLocalDateTime(),
-                            plannedCost = cursor.getDouble(plannedCostIdx),
-                            consumedCost = cursor.getDouble(consumedCostIdx),
-                            leftoverCost = cursor.getDouble(leftoverCostIdx),
-                            skippedCost = cursor.getDouble(skippedCostIdx),
-                        ),
-                    )
-                }
-            }
-        }
         return AppSnapshot(
-            categories = categories,
-            stock = stock,
-            foodCatalog = foodCatalog,
-            expenses = expenses,
-            templates = templates,
-            mealLogs = mealLogs,
-            shopping = shopping,
-            spares = spares,
+            categories = db.query("categories", null, null, null, null, null, "sort_order ASC, name ASC")
+                .use { it.readRows(::readCategory) },
+            foodCatalog = db.query("food_catalog", null, null, null, null, null, "name COLLATE NOCASE ASC")
+                .use { it.readRows(::readFoodCatalog) },
+            stock = db.query("stock", null, null, null, null, null, "purchase_date DESC, name ASC")
+                .use { it.readRows(::readStock) },
+            expenses = loadExpenses(),
+            templates = db.query("meal_templates", null, null, null, null, null, "meal_type ASC, cost ASC")
+                .use { it.readRows(::readTemplate) },
+            mealLogs = db.query("meal_logs", null, null, null, null, null, "date DESC, actual_time DESC")
+                .use { it.readRows(::readMealLog) },
+            shopping = db.query("shopping", null, null, null, null, null, "is_checked ASC, created_date DESC, name ASC")
+                .use { it.readRows(::readShopping) },
+            spares = db.query("spares", null, null, null, null, null, "date ASC, rowid ASC")
+                .use { it.readRows(::readSpares) },
+            dayPlans = db.query("day_plans", null, null, null, null, null, "date ASC, meal_type ASC")
+                .use { it.readRows(::readDayPlan) },
+            dayClosures = db.query("day_closures", null, null, null, null, null, "date DESC")
+                .use { it.readRows(::readDayClosure) },
             settings = settings,
-            dayPlans = dayPlans,
-            dayClosures = dayClosures,
+            today = today,
         )
     }
 
@@ -415,7 +53,7 @@ fun loadSnapshot(settings: BudgetSettings): AppSnapshot {
         }
     }
 
-fun loadShoppingById(id: String): ShoppingItem? {
+    fun loadShoppingById(id: String): ShoppingItem? {
         return writableDatabase.query(
             "shopping",
             null,
@@ -431,58 +69,16 @@ fun loadShoppingById(id: String): ShoppingItem? {
     }
 
     fun findCategoryById(id: String): ExpenseCategory? {
-        return readableDatabase.query(
-            "categories",
-            null,
-            "id = ?",
-            arrayOf(id),
-            null,
-            null,
-            null,
-            "1",
-        ).use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            ExpenseCategory(
-                id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                icon = cursor.getString(cursor.getColumnIndexOrThrow("icon")),
-                monthlyBudget = cursor.getDouble(cursor.getColumnIndexOrThrow("monthly_budget")),
-                isFood = cursor.getInt(cursor.getColumnIndexOrThrow("is_food")) == 1,
-                isCustom = cursor.getInt(cursor.getColumnIndexOrThrow("is_custom")) == 1,
-                sortOrder = cursor.getInt(cursor.getColumnIndexOrThrow("sort_order")),
-            )
-        }
+        return readableDatabase.query("categories", null, "id = ?", arrayOf(id), null, null, null, "1")
+            .use { cursor -> if (cursor.moveToFirst()) readCategory(cursor) else null }
     }
 
     fun findTemplateByNameLike(query: String): MealTemplate? {
-        return readableDatabase.query(
-            "meal_templates",
-            null,
-            "name LIKE ?",
-            arrayOf("%$query%"),
-            null,
-            null,
-            null,
-            "1",
-        ).use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            MealTemplate(
-                id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                mealType = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("meal_type")), MealType.SNACK),
-                cost = cursor.getDouble(cursor.getColumnIndexOrThrow("cost")),
-                isRecurring = cursor.getInt(cursor.getColumnIndexOrThrow("is_recurring")) == 1,
-                dayOfWeek = cursor.getString(cursor.getColumnIndexOrThrow("day_of_week"))?.let { dayValue ->
-                    runCatching { java.time.DayOfWeek.valueOf(dayValue) }.getOrNull()
-                },
-                notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")),
-                isCustom = cursor.getInt(cursor.getColumnIndexOrThrow("is_custom")) == 1,
-                components = MealDataCodec.decodeComponents(cursor.getString(cursor.getColumnIndexOrThrow("components_json"))),
-            )
-        }
+        return readableDatabase.query("meal_templates", null, "name LIKE ?", arrayOf("%$query%"), null, null, null, "1")
+            .use { cursor -> if (cursor.moveToFirst()) readTemplate(cursor) else null }
     }
 
-fun upsertCategory(category: ExpenseCategory) {
+    fun upsertCategory(category: ExpenseCategory) {
         val values = ContentValues().apply {
             put("id", category.id)
             put("name", category.name)
@@ -495,7 +91,7 @@ fun upsertCategory(category: ExpenseCategory) {
         writableDatabase.insertWithOnConflict("categories", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-fun upsertFoodCatalogItems(items: List<FoodCatalogItem>) {
+    fun upsertFoodCatalogItems(items: List<FoodCatalogItem>) {
         if (items.isEmpty()) return
         val db = writableDatabase
         db.beginTransaction()
@@ -507,7 +103,7 @@ fun upsertFoodCatalogItems(items: List<FoodCatalogItem>) {
         }
     }
 
-fun upsertFoodCatalogItem(item: FoodCatalogItem) {
+    fun upsertFoodCatalogItem(item: FoodCatalogItem) {
         val values = ContentValues().apply {
             put("id", item.id)
             put("name", item.name)
@@ -528,14 +124,14 @@ fun upsertFoodCatalogItem(item: FoodCatalogItem) {
         writableDatabase.insertWithOnConflict("food_catalog", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-fun deleteFoodCatalogItem(id: String) {
+    fun deleteFoodCatalogItem(id: String) {
         writableDatabase.delete("food_catalog", "id = ?", arrayOf(id))
         writableDatabase.execSQL("UPDATE stock SET catalog_id = NULL WHERE catalog_id = ?", arrayOf(id))
     }
 
-fun findFoodCatalogItem(name: String): FoodCatalogItem? {
+    fun findFoodCatalogItem(name: String): FoodCatalogItem? {
         val typedName = name.trim()
-        val canonicalName = when (typedName.lowercase()) {
+        val canonicalName = when (typedName.lowercase(Locale.US)) {
             "tomato", "tomatoes" -> "Tomatoes"
             "cucumber", "cucumbers" -> "Cucumbers"
             "bread", "baladi bread" -> "Baladi bread"
@@ -549,7 +145,7 @@ fun findFoodCatalogItem(name: String): FoodCatalogItem? {
         ).use { cursor -> if (cursor.moveToFirst()) readFoodCatalog(cursor) else null }
     }
 
-fun findFoodCatalogItemById(id: String): FoodCatalogItem? {
+    fun findFoodCatalogItemById(id: String): FoodCatalogItem? {
         return readableDatabase.query(
             "food_catalog",
             null,
@@ -562,13 +158,11 @@ fun findFoodCatalogItemById(id: String): FoodCatalogItem? {
         ).use { cursor -> if (cursor.moveToFirst()) readFoodCatalog(cursor) else null }
     }
 
-
-
-fun deleteCategory(id: String) {
+    fun deleteCategory(id: String) {
         writableDatabase.delete("categories", "id = ?", arrayOf(id))
     }
 
-fun categoryHasExpenses(id: String): Boolean {
+    fun categoryHasExpenses(id: String): Boolean {
         return readableDatabase.query(
             "expenses",
             arrayOf("id"),
@@ -581,7 +175,7 @@ fun categoryHasExpenses(id: String): Boolean {
         ).use { it.moveToFirst() }
     }
 
-fun upsertStock(item: StockItem) {
+    fun upsertStock(item: StockItem) {
         val values = ContentValues().apply {
             put("id", item.id)
             put("name", item.name)
@@ -594,15 +188,10 @@ fun upsertStock(item: StockItem) {
             put("batch_type", item.batchType.name)
             put("usage_per_day", item.estimatedUsagePerDay)
             put("consumed_quantity", item.consumedQuantity.coerceIn(0.0, item.totalQuantity.coerceAtLeast(0.0)))
-            val historyToStore = if (item.datedUsageHistory.isNotEmpty()) {
-                item.datedUsageHistory.joinToString(",") { "${it.date}:${it.amount}:${it.sourceId.orEmpty()}" }
-            } else {
-                item.usageHistory.joinToString(",")
-            }
-            put("usage_history", historyToStore)
+            put("usage_history", StockUsageCodec.encode(item))
             put("notes", item.notes)
-                put("catalog_id", item.catalogId)
-                put("linked_expense_id", item.linkedExpenseId)
+            put("catalog_id", item.catalogId)
+            put("linked_expense_id", item.linkedExpenseId)
             put("package_label", item.packageLabel)
             put("package_size", item.packageSize)
             put("conversion_known", if (item.conversionKnown) 1 else 0)
@@ -613,7 +202,7 @@ fun upsertStock(item: StockItem) {
         }
     }
 
-fun deleteStock(id: String) {
+    fun deleteStock(id: String) {
         writableDatabase.delete("stock", "id = ?", arrayOf(id))
     }
 
@@ -643,7 +232,7 @@ fun deleteStock(id: String) {
         }
     }
 
-fun addUsage(id: String, amount: Double, date: LocalDate = LocalDate.now()): Boolean {
+    fun addUsage(id: String, amount: Double, date: LocalDate = LocalDate.now()): Boolean {
         val current = loadStockById(id) ?: return false
         val safeAmount = amount.coerceIn(0.0, current.remainingQuantity)
         val updated = current.copy(
@@ -655,68 +244,17 @@ fun addUsage(id: String, amount: Double, date: LocalDate = LocalDate.now()): Boo
         return true
     }
 
-fun loadStockById(id: String): StockItem? {
-        return readableDatabase.query("stock", null, "id = ?", arrayOf(id), null, null, null).use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val history = cursor.getString(cursor.getColumnIndexOrThrow("usage_history"))
-            val purchaseDate = LocalDate.ofEpochDay(cursor.getLong(cursor.getColumnIndexOrThrow("purchase_date")))
-            StockItem(
-                id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                category = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("category")), ItemCategory.OTHER),
-                unit = cursor.getString(cursor.getColumnIndexOrThrow("unit")),
-                totalQuantity = cursor.getDouble(cursor.getColumnIndexOrThrow("total_quantity")),
-                totalPrice = cursor.getDouble(cursor.getColumnIndexOrThrow("total_price")),
-                purchaseDate = purchaseDate,
-                expiryDate = cursor.getLong(cursor.getColumnIndexOrThrow("expiry_date")).takeIf { it > 0L }?.let(LocalDate::ofEpochDay),
-                batchType = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("batch_type")), BatchType.CUSTOM),
-                estimatedUsagePerDay = cursor.getDouble(cursor.getColumnIndexOrThrow("usage_per_day")),
-                consumedQuantity = cursor.getDouble(cursor.getColumnIndexOrThrow("consumed_quantity")),
-                usageHistory = parseUsageHistory(history),
-                datedUsageHistory = parseDatedUsage(history, purchaseDate),
-                notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")),
-                catalogId = cursor.getString(cursor.getColumnIndexOrThrow("catalog_id")),
-                packageLabel = cursor.getString(cursor.getColumnIndexOrThrow("package_label")).orEmpty(),
-                packageSize = cursor.getDouble(cursor.getColumnIndexOrThrow("package_size")),
-                conversionKnown = cursor.getInt(cursor.getColumnIndexOrThrow("conversion_known")) != 0,
-                linkedExpenseId = cursor.optionalString("linked_expense_id"),
-            )
-        }
+    fun loadStockById(id: String): StockItem? {
+        return readableDatabase.query("stock", null, "id = ?", arrayOf(id), null, null, null, "1")
+            .use { cursor -> if (cursor.moveToFirst()) readStock(cursor) else null }
     }
 
     fun loadExpenses(): List<Expense> {
-        val db = readableDatabase
-        return db.query("expenses", null, null, null, null, null, "date DESC, rowid DESC").use { cursor ->
-            val idIdx = cursor.getColumnIndexOrThrow("id")
-            val categoryIdIdx = cursor.getColumnIndexOrThrow("category_id")
-            val amountIdx = cursor.getColumnIndexOrThrow("amount")
-            val dateIdx = cursor.getColumnIndexOrThrow("date")
-            val descriptionIdx = cursor.getColumnIndexOrThrow("description")
-            val isRecurringIdx = cursor.getColumnIndexOrThrow("is_recurring")
-            val recurringFreqIdx = cursor.getColumnIndexOrThrow("recurring_frequency")
-            val isCorrectionIdx = cursor.getColumnIndexOrThrow("is_correction")
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        Expense(
-                            id = cursor.getString(idIdx),
-                            categoryId = cursor.getString(categoryIdIdx),
-                            amount = cursor.getDouble(amountIdx),
-                            date = LocalDate.ofEpochDay(cursor.getLong(dateIdx)),
-                            description = cursor.getString(descriptionIdx),
-                            isRecurring = cursor.getInt(isRecurringIdx) == 1,
-                            recurringFrequency = cursor.getString(recurringFreqIdx),
-                            isCorrection = cursor.getInt(isCorrectionIdx) == 1,
-                            recurringScheduleId = cursor.optionalString("recurring_schedule_id"),
-                            isBudgetTransfer = cursor.optionalBoolean("is_budget_transfer", false),
-                        ),
-                    )
-                }
-            }
-        }
+        return readableDatabase.query("expenses", null, null, null, null, null, "date DESC, rowid DESC")
+            .use { it.readRows(::readExpense) }
     }
 
-fun upsertExpense(expense: Expense) {
+    fun upsertExpense(expense: Expense) {
         val values = ContentValues().apply {
             put("id", expense.id)
             put("category_id", expense.categoryId)
@@ -732,53 +270,33 @@ fun upsertExpense(expense: Expense) {
         writableDatabase.insertWithOnConflict("expenses", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-fun deleteExpense(id: String) {
+    fun deleteExpense(id: String) {
         writableDatabase.delete("expenses", "id = ?", arrayOf(id))
     }
 
-fun findExpenseById(id: String): Expense? {
-        return readableDatabase.query("expenses", null, "id = ?", arrayOf(id), null, null, null).use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            Expense(
-                id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                categoryId = cursor.getString(cursor.getColumnIndexOrThrow("category_id")),
-                amount = cursor.getDouble(cursor.getColumnIndexOrThrow("amount")),
-                date = LocalDate.ofEpochDay(cursor.getLong(cursor.getColumnIndexOrThrow("date"))),
-                description = cursor.getString(cursor.getColumnIndexOrThrow("description")),
-                isRecurring = cursor.getInt(cursor.getColumnIndexOrThrow("is_recurring")) == 1,
-                recurringFrequency = cursor.getString(cursor.getColumnIndexOrThrow("recurring_frequency")),
-                isCorrection = cursor.getInt(cursor.getColumnIndexOrThrow("is_correction")) == 1,
-                recurringScheduleId = cursor.optionalString("recurring_schedule_id"),
-                isBudgetTransfer = cursor.optionalBoolean("is_budget_transfer", false),
-            )
-        }
+    fun findExpenseById(id: String): Expense? {
+        return readableDatabase.query("expenses", null, "id = ?", arrayOf(id), null, null, null, "1")
+            .use { cursor -> if (cursor.moveToFirst()) readExpense(cursor) else null }
     }
 
-fun findExpenseForStockPurchase(date: LocalDate, name: String, amount: Double): Expense? {
-        val dateEpoch = date.toEpochDay().toString()
-        val desc = "Bought $name"
-        readableDatabase.query("expenses", null, "date = ? AND description = ?", arrayOf(dateEpoch, desc), null, null, "rowid DESC", "1").use { cursor ->
-            if (cursor.moveToFirst()) {
-                return Expense(
-                    id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                    categoryId = cursor.getString(cursor.getColumnIndexOrThrow("category_id")),
-                    amount = cursor.getDouble(cursor.getColumnIndexOrThrow("amount")),
-                    date = LocalDate.ofEpochDay(cursor.getLong(cursor.getColumnIndexOrThrow("date"))),
-                    description = cursor.getString(cursor.getColumnIndexOrThrow("description")),
-                    isRecurring = cursor.getInt(cursor.getColumnIndexOrThrow("is_recurring")) == 1,
-                    recurringFrequency = cursor.getString(cursor.getColumnIndexOrThrow("recurring_frequency")),
-                    isCorrection = cursor.getInt(cursor.getColumnIndexOrThrow("is_correction")) == 1,
-                )
-            }
-        }
-        return null
+    fun findExpenseForStockPurchase(date: LocalDate, name: String, amount: Double): Expense? {
+        return readableDatabase.query(
+            "expenses",
+            null,
+            "date = ? AND description = ? AND ABS(amount - ?) < 0.001",
+            arrayOf(date.toEpochDay().toString(), "Bought $name", amount.toString()),
+            null,
+            null,
+            "rowid DESC",
+            "1",
+        ).use { cursor -> if (cursor.moveToFirst()) readExpense(cursor) else null }
     }
 
-fun clearSampleStock() {
+    fun clearSampleStock() {
         DatabaseMigrations.clearSampleStock(writableDatabase)
     }
 
-fun upsertTemplate(template: MealTemplate) {
+    fun upsertTemplate(template: MealTemplate) {
         val values = ContentValues().apply {
             put("id", template.id)
             put("name", template.name)
@@ -793,15 +311,15 @@ fun upsertTemplate(template: MealTemplate) {
         writableDatabase.insertWithOnConflict("meal_templates", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-fun deleteTemplate(id: String) {
+    fun deleteTemplate(id: String) {
         writableDatabase.delete("meal_templates", "id = ?", arrayOf(id))
     }
 
-fun upsertMealLog(log: MealLog) {
+    fun upsertMealLog(log: MealLog) {
         saveMealLogsWithComponents(listOf(log))
     }
 
-fun loadMealLog(date: LocalDate, mealType: MealType): MealLog? {
+    fun loadMealLog(date: LocalDate, mealType: MealType): MealLog? {
         return readableDatabase.query(
             "meal_logs",
             null,
@@ -811,32 +329,14 @@ fun loadMealLog(date: LocalDate, mealType: MealType): MealLog? {
             null,
             "actual_time DESC",
             "1",
-        ).use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            val cost = cursor.getDouble(cursor.getColumnIndexOrThrow("cost"))
-            MealLog(
-                id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                date = LocalDate.ofEpochDay(cursor.getLong(cursor.getColumnIndexOrThrow("date"))),
-                mealType = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("meal_type")), MealType.SNACK),
-                templateId = cursor.getString(cursor.getColumnIndexOrThrow("template_id")),
-                name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                cost = cost,
-                actualTime = java.time.Instant.ofEpochSecond(cursor.getLong(cursor.getColumnIndexOrThrow("actual_time")))
-                    .atZone(java.time.ZoneId.systemDefault())
-                    .toLocalDateTime(),
-                consumedCost = cursor.getDouble(cursor.getColumnIndexOrThrow("consumed_cost")).coerceIn(0.0, cost.coerceAtLeast(0.0)),
-                foods = cursor.getString(cursor.getColumnIndexOrThrow("foods")),
-                status = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("status")), MealStatus.EATEN),
-                components = MealDataCodec.decodeComponents(cursor.getString(cursor.getColumnIndexOrThrow("components_json"))),
-            )
-        }
+        ).use { cursor -> if (cursor.moveToFirst()) readMealLog(cursor) else null }
     }
 
-fun upsertMealLogs(logs: List<MealLog>, closure: DayClosure? = null) {
+    fun upsertMealLogs(logs: List<MealLog>, closure: DayClosure? = null) {
         saveMealLogsWithComponents(logs, closure)
     }
 
-fun saveMealLogsWithComponents(logs: List<MealLog>, closure: DayClosure? = null) {
+    fun saveMealLogsWithComponents(logs: List<MealLog>, closure: DayClosure? = null) {
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -869,7 +369,7 @@ fun saveMealLogsWithComponents(logs: List<MealLog>, closure: DayClosure? = null)
         }
     }
 
-private fun mealLogValues(log: MealLog): ContentValues = ContentValues().apply {
+    private fun mealLogValues(log: MealLog): ContentValues = ContentValues().apply {
         put("id", log.id)
         put("date", log.date.toEpochDay())
         put("meal_type", log.mealType.name)
@@ -883,7 +383,7 @@ private fun mealLogValues(log: MealLog): ContentValues = ContentValues().apply {
         put("components_json", MealDataCodec.encodeComponents(log.components))
     }
 
-private fun dayClosureValues(closure: DayClosure): ContentValues = ContentValues().apply {
+    private fun dayClosureValues(closure: DayClosure): ContentValues = ContentValues().apply {
         put("date", closure.date.toEpochDay())
         put("closed_at", closure.closedAt.atZone(java.time.ZoneId.systemDefault()).toEpochSecond())
         put("planned_cost", closure.plannedCost)
@@ -892,7 +392,7 @@ private fun dayClosureValues(closure: DayClosure): ContentValues = ContentValues
         put("skipped_cost", closure.skippedCost)
     }
 
-private fun reverseMealConsumption(db: SQLiteDatabase, logId: String) {
+    private fun reverseMealConsumption(db: SQLiteDatabase, logId: String) {
         val allocations = db.query(
             "meal_consumptions",
             arrayOf("stock_item_id", "stock_quantity"),
@@ -926,7 +426,7 @@ private fun reverseMealConsumption(db: SQLiteDatabase, logId: String) {
         db.delete("meal_consumptions", "log_id = ?", arrayOf(logId))
     }
 
-private fun applyMealConsumption(db: SQLiteDatabase, log: MealLog) {
+    private fun applyMealConsumption(db: SQLiteDatabase, log: MealLog) {
         if (!log.isConsumed || log.components.isEmpty()) return
         // When a meal is cooked with leftovers, ensure all raw ingredients are deducted from stock
         // (since they were cooked), while leftover portions are tracked as prepared food.
@@ -1032,23 +532,12 @@ private fun applyMealConsumption(db: SQLiteDatabase, log: MealLog) {
         }
     }
 
-private fun loadFoodCatalog(db: SQLiteDatabase, id: String): FoodCatalogItem? {
-        return db.query("food_catalog", null, "id = ?", arrayOf(id), null, null, null, "1").use { cursor ->
-            if (!cursor.moveToFirst()) return@use null
-            FoodCatalogItem(
-                id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                category = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("category")), ItemCategory.FOOD_FRESH),
-                stockUnit = cursor.getString(cursor.getColumnIndexOrThrow("stock_unit")),
-                portionUnit = cursor.getString(cursor.getColumnIndexOrThrow("portion_unit")),
-                portionsPerStockUnit = cursor.getDouble(cursor.getColumnIndexOrThrow("portions_per_stock_unit")).coerceAtLeast(0.0001),
-                defaultCostPerPortion = cursor.getDouble(cursor.getColumnIndexOrThrow("default_cost_per_portion")).coerceAtLeast(0.0),
-                notes = cursor.getString(cursor.getColumnIndexOrThrow("notes")),
-            )
-        }
+    private fun loadFoodCatalog(db: SQLiteDatabase, id: String): FoodCatalogItem? {
+        return db.query("food_catalog", null, "id = ?", arrayOf(id), null, null, null, "1")
+            .use { cursor -> if (cursor.moveToFirst()) readFoodCatalog(cursor) else null }
     }
 
-private fun insertConsumption(
+    private fun insertConsumption(
         db: SQLiteDatabase,
         logId: String,
         component: MealComponent,
@@ -1081,7 +570,7 @@ private fun insertConsumption(
         val consumed: Double,
     )
 
-fun deleteMealLog(id: String) {
+    fun deleteMealLog(id: String) {
         val db = writableDatabase
         val date = db.query(
             "meal_logs",
@@ -1106,7 +595,7 @@ fun deleteMealLog(id: String) {
         }
     }
 
-fun upsertShopping(item: ShoppingItem) {
+    fun upsertShopping(item: ShoppingItem) {
         val values = ContentValues().apply {
             put("id", item.id)
             put("name", item.name)
@@ -1125,11 +614,11 @@ fun upsertShopping(item: ShoppingItem) {
         writableDatabase.insertWithOnConflict("shopping", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-fun deleteShopping(id: String) {
+    fun deleteShopping(id: String) {
         writableDatabase.delete("shopping", "id = ?", arrayOf(id))
     }
 
-fun upsertSpares(transaction: SparesTransaction) {
+    fun upsertSpares(transaction: SparesTransaction) {
         val values = ContentValues().apply {
             put("id", transaction.id)
             put("date", transaction.date.toEpochDay())
@@ -1140,11 +629,11 @@ fun upsertSpares(transaction: SparesTransaction) {
         writableDatabase.insertWithOnConflict("spares", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-fun deleteSpares(id: String) {
+    fun deleteSpares(id: String) {
         writableDatabase.delete("spares", "id = ?", arrayOf(id))
     }
 
-fun ensureDayPlan(date: LocalDate, templates: List<MealTemplate>): Int {
+    fun ensureDayPlan(date: LocalDate, templates: List<MealTemplate>): Int {
         val db = writableDatabase
         var insertedCount = 0
         val existingTypes = db.query(
@@ -1181,7 +670,7 @@ fun ensureDayPlan(date: LocalDate, templates: List<MealTemplate>): Int {
         return insertedCount
     }
 
-fun replaceOpenDayPlan(date: LocalDate, templates: List<MealTemplate>): Boolean {
+    fun replaceOpenDayPlan(date: LocalDate, templates: List<MealTemplate>): Boolean {
         val db = writableDatabase
         var replaced = false
         db.beginTransaction()
@@ -1231,7 +720,7 @@ fun replaceOpenDayPlan(date: LocalDate, templates: List<MealTemplate>): Boolean 
         return replaced
     }
 
-fun saveDayPlanMeals(date: LocalDate, meals: Map<MealType, MealTemplate>): Boolean {
+    fun saveDayPlanMeals(date: LocalDate, meals: Map<MealType, MealTemplate>): Boolean {
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -1270,41 +759,17 @@ fun saveDayPlanMeals(date: LocalDate, meals: Map<MealType, MealTemplate>): Boole
         }
     }
 
-fun loadDayPlans(date: LocalDate): List<DailyMealPlan> {
+    fun loadDayPlans(date: LocalDate): List<DailyMealPlan> {
         return readableDatabase.query(
-            "day_plans",
-            null,
-            "date = ?",
-            arrayOf(date.toEpochDay().toString()),
-            null,
-            null,
-            "meal_type ASC",
-        ).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        DailyMealPlan(
-                            id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-                            date = LocalDate.ofEpochDay(cursor.getLong(cursor.getColumnIndexOrThrow("date"))),
-                            mealType = enumValueOrDefault(cursor.getString(cursor.getColumnIndexOrThrow("meal_type")), MealType.SNACK),
-                            templateId = cursor.getString(cursor.getColumnIndexOrThrow("template_id")),
-                            name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
-                            cost = cursor.getDouble(cursor.getColumnIndexOrThrow("cost")),
-                            foods = cursor.getString(cursor.getColumnIndexOrThrow("foods")),
-                            components = MealDataCodec.decodeComponents(cursor.getString(cursor.getColumnIndexOrThrow("components_json"))),
-                            isCleared = cursor.optionalBoolean("is_cleared", false),
-                        ),
-                    )
-                }
-            }
-        }
+            "day_plans", null, "date = ?", arrayOf(date.toEpochDay().toString()), null, null, "meal_type ASC",
+        ).use { it.readRows(::readDayPlan) }
     }
 
-fun deleteDayClosure(date: LocalDate) {
+    fun deleteDayClosure(date: LocalDate) {
         writableDatabase.delete("day_closures", "date = ?", arrayOf(date.toEpochDay().toString()))
     }
 
-fun autoClosePastDays(today: LocalDate) {
+    fun autoClosePastDays(today: LocalDate, closedAt: LocalDateTime = LocalDateTime.now()) {
         val openDates = readableDatabase.rawQuery(
             "SELECT DISTINCT plan.date FROM day_plans AS plan " +
                 "LEFT JOIN day_closures AS closure ON closure.date = plan.date " +
@@ -1315,11 +780,11 @@ fun autoClosePastDays(today: LocalDate) {
                 while (cursor.moveToNext()) add(LocalDate.ofEpochDay(cursor.getLong(0)))
             }
         }
-        closeDates(openDates)
+        closeDates(openDates, closedAt)
         writableDatabase.delete("day_plans", "date < ?", arrayOf(today.minusDays(90).toEpochDay().toString()))
     }
 
-fun closeDay(date: LocalDate) {
+    fun closeDay(date: LocalDate, closedAt: LocalDateTime = LocalDateTime.now()) {
         val alreadyClosed = readableDatabase.query(
             "day_closures",
             arrayOf("date"),
@@ -1330,10 +795,10 @@ fun closeDay(date: LocalDate) {
             null,
             "1",
         ).use { it.moveToFirst() }
-        if (!alreadyClosed) closeDates(listOf(date))
+        if (!alreadyClosed) closeDates(listOf(date), closedAt)
     }
 
-private fun closeDates(dates: List<LocalDate>) {
+    private fun closeDates(dates: List<LocalDate>, closedAt: LocalDateTime) {
         dates.forEach { date ->
             val plans = loadDayPlans(date)
             if (plans.isEmpty()) return@forEach
@@ -1363,7 +828,7 @@ private fun closeDates(dates: List<LocalDate>) {
                 logs,
                 DayClosure(
                     date = date,
-                    closedAt = LocalDateTime.now(),
+                    closedAt = closedAt,
                     plannedCost = plannedCost,
                     consumedCost = consumedCost,
                     leftoverCost = leftoverCost,
@@ -1373,13 +838,12 @@ private fun closeDates(dates: List<LocalDate>) {
         }
     }
 
-fun clearAllUserData() {
+    fun clearAllUserData() {
         val db = writableDatabase
         listOf("day_closures", "day_plans", "meal_consumptions", "meal_logs", "shopping", "spares", "expenses", "stock", "food_catalog", "meal_templates", "categories").forEach {
             db.delete(it, null, null)
         }
     }
-
 
     companion object {
         const val DATABASE_NAME = "budget_meals.db"

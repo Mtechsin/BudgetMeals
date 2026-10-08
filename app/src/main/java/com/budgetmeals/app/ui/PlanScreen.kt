@@ -35,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -68,7 +69,9 @@ fun PlanScreen(
     onRebuildPlan: (List<LocalDate>) -> Unit,
 ) {
     val today = snapshot.today
-    var planStartEpoch by rememberSaveable { mutableStateOf(today.toEpochDay()) }
+    var planStartEpoch by rememberSaveable(saver = mutableLongStateSaver) {
+        mutableLongStateOf(today.toEpochDay())
+    }
     var selectedDateEpoch by rememberSaveable { mutableStateOf<Long?>(null) }
     var lastObservedToday by remember { mutableStateOf(today) }
     val planStart = LocalDate.ofEpochDay(planStartEpoch)

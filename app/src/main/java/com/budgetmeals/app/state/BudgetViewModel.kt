@@ -4,7 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.budgetmeals.app.data.AppSnapshot
+import com.budgetmeals.app.data.AppThemeMode
 import com.budgetmeals.app.data.BudgetRepository
+import com.budgetmeals.app.data.BudgetSettings
 import com.budgetmeals.app.data.Expense
 import com.budgetmeals.app.data.ExpenseCategory
 import com.budgetmeals.app.data.FoodCatalogItem
@@ -14,15 +16,12 @@ import com.budgetmeals.app.data.MealStatus
 import com.budgetmeals.app.data.MealTemplate
 import com.budgetmeals.app.data.MealType
 import com.budgetmeals.app.data.ShoppingItem
-import com.budgetmeals.app.data.SparesTransaction
 import com.budgetmeals.app.data.StockItem
-import com.budgetmeals.app.data.BudgetSettings
-import com.budgetmeals.app.data.AppThemeMode
-import kotlinx.coroutines.Dispatchers
+import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,31 +30,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import com.budgetmeals.app.data.MealComponent
-import java.time.DayOfWeek
-import java.time.LocalDate
-
-import androidx.compose.runtime.Immutable
-
-@Immutable
-data class MealBuilderDraft(
-    val name: String = "",
-    val mealType: MealType = MealType.LUNCH,
-    val components: List<MealComponent> = emptyList(),
-    val cost: String = "",
-    val isRecurring: Boolean = true,
-    val dayOfWeek: DayOfWeek? = null,
-    val notes: String = "",
-    val hasStarted: Boolean = false,
-)
-
-@Immutable
-data class BudgetUiState(
-    val snapshot: AppSnapshot = AppSnapshot(),
-    val isLoading: Boolean = true,
-    val message: String? = null,
-)
 
 class BudgetViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = BudgetRepository(application)
@@ -80,20 +57,17 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppThemeMode.SYSTEM)
 
     init {
+        viewModelScope.coroutineContext[Job]?.invokeOnCompletion { repository.close() }
         refresh()
     }
 
     fun refresh() {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not load your budget data.") {
-                mutationMutex.withLock {
-                    val today = LocalDate.now()
-                    val initial = repository.loadSnapshot()
-                    val inserted = repository.ensureDayPlan(today, BudgetMath.generatedMealsForDate(initial, today).values.toList())
-                    val snapshot = if (inserted > 0) repository.loadSnapshot() else initial
-                    _uiState.update { it.copy(snapshot = snapshot, isLoading = false) }
-                }
-            }
+        launchMutation("Could not load your budget data.") {
+            val today = LocalDate.now()
+            val initial = repository.loadSnapshot()
+            val inserted = repository.ensureDayPlan(today, BudgetMath.generatedMealsForDate(initial, today).values.toList())
+            val snapshot = if (inserted > 0) repository.loadSnapshot() else initial
+            MutationUpdate(snapshot = snapshot)
         }
     }
 
@@ -156,29 +130,16 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun importFoodCatalogJson(raw: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("The food catalog JSON could not be imported.") {
-                mutationMutex.withLock {
-                    val count = repository.importFoodCatalogJson(raw)
-                    val snapshot = repository.loadSnapshot()
-                    _uiState.update {
-                        it.copy(
-                            snapshot = snapshot,
-                            isLoading = false,
-                            message = "Imported $count food ${if (count == 1) "item" else "items"}.",
-                        )
-                    }
-                }
-            }
+        launchMutation("The food catalog JSON could not be imported.") {
+            val count = repository.importFoodCatalogJson(raw)
+            MutationUpdate(message = "Imported $count food ${if (count == 1) "item" else "items"}.")
         }
     }
 
     fun exportFoodCatalogJson(onReady: (String) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not export the food catalog.") {
-                val json = repository.exportFoodCatalogJson(_uiState.value.snapshot)
-                withContext(Dispatchers.Main) { onReady(json) }
-            }
+        launchIo("Could not export the food catalog.") {
+            val json = repository.exportFoodCatalogJson(_uiState.value.snapshot)
+            withContext(Dispatchers.Main) { onReady(json) }
         }
     }
 
@@ -271,17 +232,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleShopping(item: ShoppingItem, onPromptBuy: ((ShoppingItem) -> Unit)?) {
         if (item.isChecked) {
             undoShoppingPurchase(item)
-        } else if (item.estimatedPrice <= 0.0 && !item.priceKnown) {
-            if (onPromptBuy != null) {
-                onPromptBuy(item)
-            } else {
-                mutateShoppingAction(
-                    successMessage = "Bought ${item.name}. Price saved to stock and spending.",
-                    failureMessage = "${item.name} was already bought or removed.",
-                ) {
-                    repository.buyShoppingItem(item, item.estimatedPrice, false)
-                }
-            }
+        } else if (item.estimatedPrice <= 0.0 && !item.priceKnown && onPromptBuy != null) {
+            onPromptBuy(item)
         } else {
             mutateShoppingAction(
                 successMessage = "Bought ${item.name}. Price saved to stock and spending.",
@@ -337,20 +289,16 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun saveTodayToSpares() {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not move today's spare to savings.") {
-                mutationMutex.withLock {
-                    val today = LocalDate.now()
-                    val amount = repository.saveTodayToSpares()
-                    val refreshed = repository.loadSnapshot()
-                    val message = when {
-                        amount > 0.0 -> "${money(amount)} moved to spares."
-                        refreshed.settings.lastSparesAutoSaveDate == today -> "Today's spare is already in spares."
-                        else -> "No spare to move today. Check your spending first."
-                    }
-                    _uiState.update { it.copy(snapshot = refreshed, isLoading = false, message = it.message ?: message) }
-                }
+        launchMutation("Could not move today's spare to savings.") {
+            val today = LocalDate.now()
+            val amount = repository.saveTodayToSpares()
+            val refreshed = repository.loadSnapshot()
+            val message = when {
+                amount > 0.0 -> "${money(amount)} moved to spares."
+                refreshed.settings.lastSparesAutoSaveDate == today -> "Today's spare is already in spares."
+                else -> "No spare to move today. Check your spending first."
             }
+            MutationUpdate(message = message, snapshot = refreshed)
         }
     }
 
@@ -383,61 +331,46 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             "${mealType.label} removed for ${BudgetMath.formatWeekday(date)}."
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not update the meal plan.") {
-                mutationMutex.withLock {
-                    val current = repository.loadSnapshot()
-                    val resultMessage = if (current.dayClosure(date) != null) {
-                        "This day is already closed. Open the day review to change it."
-                    } else if (repository.assignMealToDay(date, mealType, template, current)) {
-                        message
-                    } else {
-                        "This day is already closed. Open the day review to change it."
-                    }
-                    val refreshed = repository.loadSnapshot()
-                    _uiState.update { it.copy(snapshot = refreshed, isLoading = false, message = it.message ?: resultMessage) }
-                }
+        launchMutation("Could not update the meal plan.") {
+            val current = repository.loadSnapshot()
+            val resultMessage = if (current.dayClosure(date) != null) {
+                "This day is already closed. Open the day review to change it."
+            } else if (repository.assignMealToDay(date, mealType, template, current)) {
+                message
+            } else {
+                "This day is already closed. Open the day review to change it."
             }
+            MutationUpdate(message = resultMessage)
         }
     }
 
     fun rebuildPlanWindow(dates: List<LocalDate>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not rebuild the meal plan.") {
-                mutationMutex.withLock {
-                    val snapshot = repository.loadSnapshot()
-                    val count = repository.rebuildPlanDates(dates, snapshot)
-                    val refreshed = repository.loadSnapshot()
-                    val message = if (count > 0) {
-                        "Plan rebuilt for $count day${if (count == 1) "" else "s"}."
-                    } else {
-                        "Days in this window are already closed or have logged meals."
-                    }
-                    _uiState.update { it.copy(snapshot = refreshed, isLoading = false, message = message) }
-                }
+        launchMutation("Could not rebuild the meal plan.") {
+            val snapshot = repository.loadSnapshot()
+            val count = repository.rebuildPlanDates(dates, snapshot)
+            val message = if (count > 0) {
+                "Plan rebuilt for $count day${if (count == 1) "" else "s"}."
+            } else {
+                "Days in this window are already closed or have logged meals."
             }
+            MutationUpdate(message = message, preserveExistingMessage = false)
         }
     }
 
     fun regenerateTodayPlan() {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not rebuild today's meal plan.") {
-                mutationMutex.withLock {
-                    val today = LocalDate.now()
-                    val snapshot = repository.loadSnapshot()
-                    val replaced = repository.replaceOpenDayPlan(
-                        today,
-                        BudgetMath.generatedMealsForDate(snapshot, today).values.toList(),
-                    )
-                    val refreshed = repository.loadSnapshot()
-                    val message = if (replaced) {
-                        "Today's plan was rebuilt from your meal shortcuts."
-                    } else {
-                        "Today's plan is already locked by a meal result or day closure."
-                    }
-                    _uiState.update { it.copy(snapshot = refreshed, isLoading = false, message = message) }
-                }
+        launchMutation("Could not rebuild today's meal plan.") {
+            val today = LocalDate.now()
+            val snapshot = repository.loadSnapshot()
+            val replaced = repository.replaceOpenDayPlan(
+                today,
+                BudgetMath.generatedMealsForDate(snapshot, today).values.toList(),
+            )
+            val message = if (replaced) {
+                "Today's plan was rebuilt from your meal shortcuts."
+            } else {
+                "Today's plan is already locked by a meal result or day closure."
             }
+            MutationUpdate(message = message, preserveExistingMessage = false)
         }
     }
 
@@ -476,11 +409,9 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun exportCsv(onReady: (String) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not export your data.") {
-                val csv = repository.exportCsv(_uiState.value.snapshot)
-                withContext(Dispatchers.Main) { onReady(csv) }
-            }
+        launchIo("Could not export your data.") {
+            val csv = repository.exportCsv(_uiState.value.snapshot)
+            withContext(Dispatchers.Main) { onReady(csv) }
         }
     }
 
@@ -498,15 +429,16 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
+    private data class MutationUpdate(
+        val message: String? = null,
+        val preserveExistingMessage: Boolean = true,
+        val snapshot: AppSnapshot? = null,
+    )
+
     private fun mutate(message: String?, operation: suspend () -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not save that change. Please try again.") {
-                mutationMutex.withLock {
-                    operation()
-                    val snapshot = repository.loadSnapshot()
-                    _uiState.update { cur -> cur.copy(snapshot = snapshot, isLoading = false, message = cur.message ?: message) }
-                }
-            }
+        launchMutation("Could not save that change. Please try again.") {
+            operation()
+            MutationUpdate(message = message)
         }
     }
 
@@ -515,17 +447,39 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         failureMessage: String,
         operation: suspend () -> Boolean,
     ) {
+        launchMutation("Could not update the shopping item.") {
+            val message = if (operation()) successMessage else failureMessage
+            MutationUpdate(message = message)
+        }
+    }
+
+    private fun launchMutation(
+        fallbackMessage: String,
+        operation: suspend () -> MutationUpdate,
+    ) {
+        launchIo(fallbackMessage) {
+            val update = operation()
+            val snapshot = update.snapshot ?: repository.loadSnapshot()
+            publishSnapshot(snapshot, update.message, update.preserveExistingMessage)
+        }
+    }
+
+    private fun launchIo(fallbackMessage: String, operation: suspend () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            runWithFailureHandling("Could not update the shopping item.") {
-                mutationMutex.withLock {
-                    val succeeded = operation()
-                    val snapshot = repository.loadSnapshot()
-                    val message = if (succeeded) successMessage else failureMessage
-                    _uiState.update { cur ->
-                        cur.copy(snapshot = snapshot, isLoading = false, message = cur.message ?: message)
-                    }
-                }
+            mutationMutex.withLock {
+                runWithFailureHandling(fallbackMessage, operation)
             }
+        }
+    }
+
+    private fun publishSnapshot(
+        snapshot: AppSnapshot,
+        message: String?,
+        preserveExistingMessage: Boolean,
+    ) {
+        _uiState.update { current ->
+            val nextMessage = if (preserveExistingMessage) current.message ?: message else message
+            current.copy(snapshot = snapshot, isLoading = false, message = nextMessage)
         }
     }
 
@@ -536,18 +490,14 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             throw error
         } catch (error: Exception) {
             val message = error.message?.takeIf { it.isNotBlank() } ?: fallbackMessage
-            mutationMutex.withLock {
-                val refreshed = try {
-                    repository.loadSnapshot()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
-                _uiState.update { current ->
-                    current.copy(snapshot = refreshed ?: current.snapshot, isLoading = false, message = message)
-                }
+            val refreshed = try {
+                repository.loadSnapshot()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
             }
+            publishSnapshot(refreshed ?: _uiState.value.snapshot, message, preserveExistingMessage = false)
         }
     }
 

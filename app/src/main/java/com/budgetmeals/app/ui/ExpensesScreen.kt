@@ -1,7 +1,5 @@
 package com.budgetmeals.app.ui
 
-import com.budgetmeals.app.ui.icons.AppIcons
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,6 +28,7 @@ import com.budgetmeals.app.data.AppSnapshot
 import com.budgetmeals.app.data.Expense
 import com.budgetmeals.app.data.ExpenseCategory
 import com.budgetmeals.app.state.BudgetMath
+import com.budgetmeals.app.ui.icons.AppIcons
 import com.budgetmeals.app.ui.theme.extendedColors
 
 @Composable
@@ -92,7 +91,11 @@ fun ExpensesScreen(
         }
 
         item {
-            SectionHeader("Category budgets", "Add category", onAddCategory)
+            SectionHeader(
+                title = "Category budgets",
+                actionLabel = "Add category",
+                onAction = onAddCategory,
+            )
         }
 
         items(categories, key = { it.id }, contentType = { "category_card" }) { category ->
