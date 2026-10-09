@@ -2,11 +2,17 @@ package com.budgetmeals.app.data
 
 import android.content.Context
 import com.budgetmeals.app.state.BudgetMath
+import java.io.Closeable
+import java.time.Clock
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.UUID
 
-class BudgetRepository(context: Context) {
+class BudgetRepository(
+    context: Context,
+    private val clock: Clock = Clock.systemDefaultZone(),
+) : Closeable {
     private val database = BudgetDatabase(context.applicationContext)
     private val preferences = context.applicationContext.getSharedPreferences("budget_meals", Context.MODE_PRIVATE)
 
@@ -16,9 +22,10 @@ class BudgetRepository(context: Context) {
         if (old != null && old == new) old else new
 
     fun loadSnapshot(): AppSnapshot {
-        database.autoClosePastDays(LocalDate.now())
-        processRecurringExpenses(LocalDate.now())
-        val raw = database.loadSnapshot(readSettings())
+        val today = LocalDate.now(clock)
+        database.autoClosePastDays(today, LocalDateTime.now(clock))
+        processRecurringExpenses(today)
+        val raw = database.loadSnapshot(readSettings(), today)
         val prev = lastSnapshot
         val snapshot = if (prev != null) {
             raw.copy(
@@ -81,7 +88,7 @@ class BudgetRepository(context: Context) {
     }
 
     fun closeDay(date: LocalDate) {
-        database.closeDay(date)
+        database.closeDay(date, LocalDateTime.now(clock))
     }
 
     @Volatile
@@ -175,6 +182,7 @@ class BudgetRepository(context: Context) {
     }
 
     fun saveStock(item: StockItem, rememberForNextShop: Boolean = false, catalogItem: FoodCatalogItem? = null) {
+        val existing = database.loadStockById(item.id)
         val resolvedCatalog = if (item.category == ItemCategory.HOUSEHOLD || item.category == ItemCategory.OTHER) {
             null
         } else {
@@ -182,18 +190,11 @@ class BudgetRepository(context: Context) {
                 ?: database.findFoodCatalogItem(item.name)
         }
         val linkedItem = withPackageFacts(linkToCatalogBase(item, resolvedCatalog), resolvedCatalog, item.unit)
-        val singleMealAdjusted = if (linkedItem.batchType == BatchType.SINGLE_MEAL) {
-            linkedItem.copy(
-                consumedQuantity = linkedItem.totalQuantity,
-                usageHistory = if (linkedItem.usageHistory.isEmpty()) listOf(linkedItem.totalQuantity) else linkedItem.usageHistory,
-                datedUsageHistory = if (linkedItem.datedUsageHistory.isEmpty()) listOf(DatedUsage(linkedItem.purchaseDate, linkedItem.totalQuantity)) else linkedItem.datedUsageHistory,
-            )
-        } else {
-            linkedItem
-        }
+        val singleMealAdjusted = consumeSingleMeal(linkedItem).copy(
+            linkedExpenseId = existing?.linkedExpenseId ?: linkedItem.linkedExpenseId,
+        )
         val shoppingItem = if (rememberForNextShop) rememberedShoppingItem(singleMealAdjusted) else null
 
-        val existing = database.loadStockById(item.id)
         val expenseCategoryId = when (item.category) {
             ItemCategory.HOUSEHOLD -> "household"
             ItemCategory.OTHER -> "other"
@@ -210,7 +211,8 @@ class BudgetRepository(context: Context) {
 
             if (existing != null && kotlin.math.abs(existing.totalPrice - singleMealAdjusted.totalPrice) > 0.001) {
                 val diff = singleMealAdjusted.totalPrice - existing.totalPrice
-                val linkedExpense = database.findExpenseById("stock-${existing.id}")
+                val linkedExpense = existing.linkedExpenseId?.let { database.findExpenseById(it) }
+                    ?: database.findExpenseById("stock-${existing.id}")
                     ?: database.findExpenseForStockPurchase(existing.purchaseDate, existing.name, existing.totalPrice)
                 if (linkedExpense != null) {
                     database.upsertExpense(
@@ -283,6 +285,17 @@ class BudgetRepository(context: Context) {
         return item.copy(packageLabel = label, packageSize = size)
     }
 
+    private fun consumeSingleMeal(item: StockItem): StockItem {
+        if (item.batchType != BatchType.SINGLE_MEAL) return item
+        return item.copy(
+            consumedQuantity = item.totalQuantity,
+            usageHistory = item.usageHistory.ifEmpty { listOf(item.totalQuantity) },
+            datedUsageHistory = item.datedUsageHistory.ifEmpty {
+                listOf(DatedUsage(item.purchaseDate, item.totalQuantity))
+            },
+        )
+    }
+
     fun recordPurchase(
         item: StockItem,
         rememberForNextShop: Boolean = false,
@@ -324,15 +337,7 @@ class BudgetRepository(context: Context) {
             linkToCatalogBase(item, catalog)
         }
         val linkedItem = withPackageFacts(baseItem, resolvedCatalog, item.unit)
-        val singleMealAdjusted = if (linkedItem.batchType == BatchType.SINGLE_MEAL) {
-            linkedItem.copy(
-                consumedQuantity = linkedItem.totalQuantity,
-                usageHistory = if (linkedItem.usageHistory.isEmpty()) listOf(linkedItem.totalQuantity) else linkedItem.usageHistory,
-                datedUsageHistory = if (linkedItem.datedUsageHistory.isEmpty()) listOf(DatedUsage(linkedItem.purchaseDate, linkedItem.totalQuantity)) else linkedItem.datedUsageHistory,
-            )
-        } else {
-            linkedItem
-        }
+        val singleMealAdjusted = consumeSingleMeal(linkedItem).copy(linkedExpenseId = expenseId)
         val expense = Expense(
             id = expenseId,
             categoryId = expenseCategoryId,
@@ -362,7 +367,7 @@ class BudgetRepository(context: Context) {
         database.upsertShopping(rememberedShoppingItem(item))
     }
 
-    fun logUsage(itemId: String, amount: Double, date: LocalDate = LocalDate.now()) {
+    fun logUsage(itemId: String, amount: Double, date: LocalDate = LocalDate.now(clock)) {
         database.addUsage(itemId, amount, date)
     }
 
@@ -384,7 +389,7 @@ class BudgetRepository(context: Context) {
         database.deleteExpense(id)
     }
 
-    fun processRecurringExpenses(today: LocalDate = LocalDate.now()): List<Expense> {
+    fun processRecurringExpenses(today: LocalDate = LocalDate.now(clock)): List<Expense> {
         val allExpenses = database.loadExpenses()
         val toGenerate = BudgetMath.computeRecurringExpensesToGenerate(allExpenses, today)
         toGenerate.forEach { database.upsertExpense(it) }
@@ -396,7 +401,7 @@ class BudgetRepository(context: Context) {
     }
 
     fun loadSamplePantry() {
-        database.loadSamplePantry()
+        database.loadSamplePantry(LocalDate.now(clock))
     }
 
     fun saveTemplate(template: MealTemplate) {
@@ -431,7 +436,7 @@ class BudgetRepository(context: Context) {
                 templateId = template.id,
                 name = template.name,
                 cost = template.cost,
-                actualTime = existing?.actualTime ?: java.time.LocalDateTime.now(),
+                actualTime = existing?.actualTime ?: LocalDateTime.now(clock),
                 consumedCost = entry.consumedCost.coerceIn(0.0, template.cost.coerceAtLeast(0.0)),
                 foods = existing?.foods?.ifBlank { template.foodSummary } ?: template.foodSummary,
                 status = entry.status,
@@ -446,7 +451,7 @@ class BudgetRepository(context: Context) {
             logs,
             DayClosure(
                 date = date,
-                closedAt = java.time.LocalDateTime.now(),
+                closedAt = LocalDateTime.now(clock),
                 plannedCost = plannedCost,
                 consumedCost = consumedCost,
                 leftoverCost = leftoverCost,
@@ -491,7 +496,7 @@ class BudgetRepository(context: Context) {
                 unit = current.unit,
                 totalQuantity = current.quantity,
                 totalPrice = price,
-                purchaseDate = LocalDate.now(),
+                purchaseDate = LocalDate.now(clock),
                 batchType = if (current.category == ItemCategory.FOOD_STREET || current.category == ItemCategory.SNACK) BatchType.SINGLE_MEAL else BatchType.WEEKLY,
                 estimatedUsagePerDay = if (current.category == ItemCategory.FOOD_STREET || current.category == ItemCategory.SNACK) current.quantity else 0.0,
                 notes = "Bought from shopping list",
@@ -558,7 +563,7 @@ class BudgetRepository(context: Context) {
         reason: String,
         category: String? = null,
         expenseCategoryId: String = "spares",
-        date: LocalDate = LocalDate.now(),
+        date: LocalDate = LocalDate.now(clock),
     ) {
         val positiveAmount = kotlin.math.abs(amount)
         if (positiveAmount <= 0.0) return
@@ -586,7 +591,7 @@ class BudgetRepository(context: Context) {
         }
     }
 
-    fun addSpares(amount: Double, reason: String, category: String? = null, date: LocalDate = LocalDate.now()) {
+    fun addSpares(amount: Double, reason: String, category: String? = null, date: LocalDate = LocalDate.now(clock)) {
         if (amount == 0.0) return
         if (amount < 0.0) {
             spendFromSpares(-amount, reason, category, "spares", date)
@@ -608,7 +613,7 @@ class BudgetRepository(context: Context) {
     }
 
     fun saveTodayToSpares(): Double {
-        val today = LocalDate.now()
+        val today = LocalDate.now(clock)
         val db = database.writableDatabase
         var amount = 0.0
         var settingsToMark: BudgetSettings? = null
@@ -616,7 +621,7 @@ class BudgetRepository(context: Context) {
         try {
             val currentSettings = readSettings(forceRefresh = true)
             if (currentSettings.lastSparesAutoSaveDate != today) {
-                val currentSnapshot = database.loadSnapshot(currentSettings)
+                val currentSnapshot = database.loadSnapshot(currentSettings, today)
                 amount = currentSnapshot.todayFoodRemaining
             }
             if (amount > 0.0) {
@@ -669,48 +674,12 @@ class BudgetRepository(context: Context) {
         )
     }
 
-    fun exportCsv(snapshot: AppSnapshot): String {
-        return buildString {
-            appendLine("BudgetMeals export")
-            appendLine("Exported,${LocalDate.now()}")
-            appendLine()
-            appendLine("Expenses")
-            appendLine("Date,Category,Amount EGP,Description,Recurring,Correction")
-            snapshot.expenses.sortedBy { it.date }.forEach { expense ->
-                val category = snapshot.categories.firstOrNull { it.id == expense.categoryId }?.name ?: "Other"
-                appendLine("${expense.date},${csvEscape(category)},${money(expense.amount)},${csvEscape(expense.description)},${expense.isRecurring},${expense.isCorrection}")
-            }
-            appendLine()
-            appendLine("Stock")
-            appendLine("Name,Category,Quantity,Unit,Price,Remaining,Days left,Cost per day")
-            snapshot.stock.forEach { item ->
-                appendLine("${csvEscape(item.name)},${item.category.label},${number(item.totalQuantity)},${csvEscape(item.unit)},${money(item.totalPrice)},${number(item.remainingQuantity)},${number(item.daysRemaining)},${money(item.costPerDay)}")
-            }
-            appendLine()
-            appendLine("Shopping list")
-            appendLine("Name,Quantity,Unit,Estimated price,Checked")
-            snapshot.shopping.forEach { item ->
-                appendLine("${csvEscape(item.name)},${number(item.quantity)},${csvEscape(item.unit)},${money(item.estimatedPrice)},${item.isChecked}")
-            }
-            appendLine()
-            appendLine("Spares")
-            appendLine("Date,Amount EGP,Reason,Category")
-            snapshot.spares.forEach { transaction ->
-                appendLine("${transaction.date},${money(transaction.amount)},${csvEscape(transaction.reason)},${csvEscape(transaction.category.orEmpty())}")
-            }
-        }
-    }
+    fun exportCsv(snapshot: AppSnapshot): String =
+        BudgetCsvCodec.encode(snapshot, LocalDate.now(clock))
 
-    private fun csvEscape(value: String): String {
-        return if (value.any { it == ',' || it == '"' || it == '\n' }) {
-            "\"${value.replace("\"", "\"\"")}\""
-        } else {
-            value
-        }
+    override fun close() {
+        database.close()
     }
-
-    private fun money(value: Double): String = String.format(java.util.Locale.US, "%.2f", value)
-    private fun number(value: Double): String = String.format(java.util.Locale.US, "%.3f", value)
 
     companion object {
         private const val KEY_MONTHLY_FOOD = "monthly_food_budget"

@@ -1,35 +1,23 @@
 package com.budgetmeals.app.data
 
-import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import java.time.LocalDate
-import java.util.UUID
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class BudgetRepositoryRegressionTest {
-    private val context = IsolatedBudgetTestContext(
-        base = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext,
-        prefix = "regression-${UUID.randomUUID()}-",
-    )
-
-    @After
-    fun cleanUp() {
-        openedDatabase?.close()
-        context.clearPreferences("budget_meals")
-        context.cleanDatabase(BudgetDao.DATABASE_NAME)
-    }
+    @get:Rule
+    internal val storage = BudgetStorageRule()
 
     @Test
     fun dayPlanAndMealConsumptionKeepComponentGramsAndReverseStockUse() {
-        val repository = BudgetRepository(context)
-        val database = openDatabase()
+        val repository = storage.openRepository()
+        val database = storage.openDatabase()
         val catalog = FoodCatalogItem(
             id = "regression-spoon-catalog",
             name = "Regression paste",
@@ -57,7 +45,7 @@ class BudgetRepositoryRegressionTest {
             cost = 10.0,
             components = listOf(component),
         )
-        val date = LocalDate.now().plusDays(2)
+        val date = storage.today.plusDays(2)
 
         repository.saveFoodCatalogItem(catalog)
         repository.saveStock(
@@ -87,7 +75,7 @@ class BudgetRepositoryRegressionTest {
         )
         repository.recordMeal(log)
 
-        assertEquals(5.0, database.loadStockById("regression-spoon-stock")!!.consumedQuantity, 0.0001)
+        assertEquals(5.0, requireNotNull(database.loadStockById("regression-spoon-stock")).consumedQuantity, 0.0001)
         assertEquals(5.0, database.loadSnapshot(BudgetSettings()).stock.single().consumedQuantity, 0.0001)
         val allocation = database.writableDatabase.rawQuery(
             "SELECT requested_quantity, consumed_quantity, portion_unit FROM meal_consumptions WHERE log_id = ?",
@@ -101,14 +89,14 @@ class BudgetRepositoryRegressionTest {
         assertEquals("g", allocation.third)
 
         repository.deleteMealLog(log.id)
-        assertEquals(0.0, database.loadStockById("regression-spoon-stock")!!.consumedQuantity, 0.0001)
+        assertEquals(0.0, requireNotNull(database.loadStockById("regression-spoon-stock")).consumedQuantity, 0.0001)
         assertEquals(0.0, database.loadSnapshot(BudgetSettings()).stock.single().consumedQuantity, 0.0001)
         assertEquals(0, rowCount(database.writableDatabase, "meal_consumptions"))
     }
 
     @Test
     fun staleShoppingBuyAndUndoOnlyApplyOnce() {
-        val repository = BudgetRepository(context)
+        val repository = storage.openRepository()
         val staleItem = ShoppingItem(
             id = "regression-laundry-list-item",
             name = "Laundry powder",
@@ -135,7 +123,7 @@ class BudgetRepositoryRegressionTest {
 
     @Test
     fun buyingDeletedShoppingItemDoesNotResurrectIt() {
-        val repository = BudgetRepository(context)
+        val repository = storage.openRepository()
         val staleItem = ShoppingItem(
             id = "regression-deleted-list-item",
             name = "Deleted detergent",
@@ -156,7 +144,7 @@ class BudgetRepositoryRegressionTest {
 
     @Test
     fun repeatedDailySavingsSaveCreatesOneTransaction() {
-        val repository = BudgetRepository(context)
+        val repository = storage.openRepository()
         val staleSettings = BudgetSettings(
             monthlyFoodBudget = 500.0,
             dailyFoodBudget = 75.0,
@@ -173,24 +161,24 @@ class BudgetRepositoryRegressionTest {
             remindersEnabled = false,
             themeMode = AppThemeMode.DARK,
         )
-        BudgetRepository(context).saveSettings(latestSettings)
+        storage.openRepository().saveSettings(latestSettings)
 
         assertEquals(90.0, repository.saveTodayToSpares(), 0.0001)
         assertEquals(0.0, repository.saveTodayToSpares(), 0.0001)
         val saved = repository.loadSnapshot().spares.filter { it.category == "daily_savings" }
         assertEquals(1, saved.size)
         assertEquals(90.0, saved.single().amount, 0.0001)
-        val persistedSettings = BudgetRepository(context).readSettings()
+        val persistedSettings = storage.openRepository().readSettings()
         assertEquals(600.0, persistedSettings.monthlyFoodBudget, 0.0001)
         assertEquals(90.0, persistedSettings.dailyFoodBudget, 0.0001)
         assertFalse(persistedSettings.remindersEnabled)
         assertEquals(AppThemeMode.DARK, persistedSettings.themeMode)
-        assertEquals(LocalDate.now(), persistedSettings.lastSparesAutoSaveDate)
+        assertEquals(storage.today, persistedSettings.lastSparesAutoSaveDate)
     }
 
     @Test
     fun newPurchaseSetsCatalogCostPerPortionFromUnitPrice() {
-        val repository = BudgetRepository(context)
+        val repository = storage.openRepository()
         val item = StockItem(
             id = "regression-cost-stock",
             name = "Regression oranges",
@@ -198,17 +186,62 @@ class BudgetRepositoryRegressionTest {
             unit = "piece",
             totalQuantity = 4.0,
             totalPrice = 20.0,
-            purchaseDate = LocalDate.now(),
+            purchaseDate = storage.today,
         )
 
         repository.recordPurchase(item)
 
-        assertEquals(5.0, repository.findFoodCatalogItem(item.name)!!.defaultCostPerPortion, 0.0001)
+        assertEquals(5.0, requireNotNull(repository.findFoodCatalogItem(item.name)).defaultCostPerPortion, 0.0001)
     }
 
-    private var openedDatabase: BudgetDatabase? = null
+    @Test
+    fun changingPurchasePriceUpdatesItsLinkedExpenseWhenBatchesHaveIdenticalPrices() {
+        val repository = storage.openRepository()
+        val first = StockItem(
+            id = "first-soap",
+            name = "Soap",
+            category = ItemCategory.HOUSEHOLD,
+            totalQuantity = 1.0,
+            totalPrice = 20.0,
+            purchaseDate = storage.today,
+        )
+        repository.recordPurchase(first, expenseId = "first-expense")
+        repository.recordPurchase(first.copy(id = "second-soap"), expenseId = "second-expense")
+        val savedFirst = repository.loadSnapshot().stock.single { it.id == first.id }
 
-    private fun openDatabase(): BudgetDatabase = BudgetDatabase(context).also { openedDatabase = it }
+        repository.saveStock(savedFirst.copy(totalPrice = 25.0, linkedExpenseId = null))
+
+        val expenses = repository.loadSnapshot().expenses.associateBy { it.id }
+        assertEquals("first-expense", savedFirst.linkedExpenseId)
+        assertEquals(
+            "first-expense",
+            repository.loadSnapshot().stock.single { it.id == first.id }.linkedExpenseId,
+        )
+        assertEquals(25.0, expenses.getValue("first-expense").amount, 0.0001)
+        assertEquals(20.0, expenses.getValue("second-expense").amount, 0.0001)
+    }
+
+    @Test
+    fun snapshotAndDayReviewUseTheRepositoryClock() {
+        val repository = storage.openRepository()
+        val template = MealTemplate(
+            id = "clock-lunch",
+            name = "Clock lunch",
+            mealType = MealType.LUNCH,
+            cost = 10.0,
+        )
+        repository.ensureDayPlan(storage.today, listOf(template))
+
+        repository.reconcileMeals(
+            storage.today,
+            listOf(MealReconciliation(template, consumedCost = 0.0, status = MealStatus.SKIPPED)),
+        )
+
+        val snapshot = repository.loadSnapshot()
+        assertEquals(storage.today, snapshot.today)
+        assertEquals(storage.today.atTime(12, 0), snapshot.dayClosure(storage.today)?.closedAt)
+        assertEquals(storage.today.atTime(12, 0), snapshot.todayLogs.getValue(MealType.LUNCH).actualTime)
+    }
 
     private fun rowCount(db: android.database.sqlite.SQLiteDatabase, table: String): Int =
         db.rawQuery("SELECT COUNT(*) FROM $table", null).use { cursor ->

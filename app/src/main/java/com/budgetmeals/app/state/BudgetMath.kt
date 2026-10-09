@@ -33,7 +33,7 @@ object BudgetMath {
     }
 
     fun quantity(value: Double): String {
-        return if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
+        return if (value % 1.0 == 0.0) String.format(Locale.US, "%.0f", value) else String.format(Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
     }
 
     fun compactMoney(value: Double): String {

@@ -37,9 +37,7 @@ internal class IsolatedBudgetTestContext(
 
     override fun deleteDatabase(name: String): Boolean = delegate.deleteDatabase(prefixed(name))
 
-    fun cleanDatabase(name: String) {
-        deleteDatabase(name)
-    }
+    override fun deleteSharedPreferences(name: String): Boolean = delegate.deleteSharedPreferences(prefixed(name))
 
     fun clearPreferences(name: String) {
         getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()

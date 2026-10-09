@@ -1,7 +1,5 @@
 package com.budgetmeals.app.ui
 
-import com.budgetmeals.app.ui.icons.AppIcons
-
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.budgetmeals.app.data.AppSnapshot
 import com.budgetmeals.app.data.AppThemeMode
 import com.budgetmeals.app.state.BudgetMath
+import com.budgetmeals.app.ui.icons.AppIcons
 import com.budgetmeals.app.ui.theme.extendedColors
 
 @Composable
@@ -50,7 +49,12 @@ fun MoreScreen(
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 128.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { ScreenHeader("More", "Settings, appearance, and export") }
+        item {
+            ScreenHeader(
+                title = "More",
+                subtitle = "Settings, appearance, and export",
+            )
+        }
 
         item {
             SoftCard(contentPadding = 18.dp) {

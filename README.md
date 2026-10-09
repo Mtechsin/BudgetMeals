@@ -15,7 +15,7 @@ BudgetMeals is a native Android app built with Kotlin and Jetpack Compose. It is
 - Meal shortcuts built from individual food components, quantities, units, and optional per-food stock tracking
 - Linked stock is reduced when a meal is marked eaten or saved in the day review, using FIFO stock batches
 - Purchase price and category are locked after saving so the cash ledger stays accurate; corrections happen through Recalculate
-- Meal plan window starts on the current day and runs through Friday
+- Meal plan window covers seven days starting on the current day
 - Cash budget based on food purchases once, without charging meal check-ins again
 - Budget correction tool for forgotten spending or matching the app to the month's real total
 - Expense tracker for food, internet, calling, household, and custom categories
@@ -35,6 +35,48 @@ Open the project in Android Studio, or run:
 The debug APK is written to `app\build\outputs\apk\debug\app-debug.apk`.
 
 The project uses the Android SDK at the path in `local.properties` for this machine. Android Studio can recreate that file if the SDK path is different.
+
+## Signing on another laptop
+
+All local builds use the shared development key at `.signing/debug.keystore`, rather than generating a different debug key on each laptop. Gradle checks its certificate before signing debug, instrumentation, or the currently configured local release APKs. A missing or different key stops the build with instructions, preventing an APK that cannot update the installed app.
+
+The keystore is private and ignored by Git. Before building from a new clone or another laptop:
+
+1. Transfer the existing `.signing/debug.keystore` privately from this laptop or your private backup.
+2. Place it at `.signing/debug.keystore` in the new project checkout. Copy the exact file; do not generate a replacement.
+3. Run `./gradlew :app:verifyDevelopmentSigningKey` (Windows: `.\gradlew.bat :app:verifyDevelopmentSigningKey`), then build normally.
+
+Keep a private backup of this file. Its expected public certificate SHA-256 is `b6d4a214235923280758ca66a5ffe2604467a2cb2bf2f02f54566aa3b0082d28`. Both laptops must retain that identity to update the same installed app while preserving data. This is development signing, including the current locally signed release build configuration.
+
+For the one-time move from an app installed with an older key, verify a data backup, uninstall the old app, install the shared-key build, and restore the data. After that replacement, builds using this shared key can be installed with `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+
+Android's [app signing documentation](https://developer.android.com/studio/publish/app-signing) explains why updates must use the same signing identity.
+
+## Checks
+
+Run local unit tests, Android lint, and compile the instrumentation tests without a device:
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+```
+
+Unit test reports are in `app/build/reports/tests/testDebugUnitTest/`; lint reports are in `app/build/reports/lint-results-debug.html`.
+
+When an emulator or device is available, run the database and repository regression tests:
+
+```powershell
+.\gradlew.bat :app:connectedDebugAndroidTest
+```
+
+Instrumentation tests use a shared `BudgetStorageRule` to isolate their database and preferences, close every opened connection, and delete their test data. Date-sensitive tests use fixed dates; `BudgetRepository` accepts a `Clock` for repeatable day calculations and timestamps.
+
+## Code organization
+
+- `data/BudgetDao.kt` contains database operations; `BudgetRowMappers.kt` shares row readers between full snapshots and individual lookups.
+- `data/AppSnapshot.kt` contains derived budget and stock summaries. JSON, CSV, and stock usage serialization live in dedicated codecs.
+- `state/BudgetViewModel.kt` serializes repository operations and error recovery; `BudgetUiState.kt` contains screen state and the meal draft.
+- `ui/SheetContent.kt` dispatches to feature-specific sheet files, using the shared `SheetScaffold.kt`. `ExportSharing.kt` handles Android export sharing.
+- Unit tests mirror the `data`, `state`, and `ui` packages and group scenarios by feature.
 
 ## First-use flow
 

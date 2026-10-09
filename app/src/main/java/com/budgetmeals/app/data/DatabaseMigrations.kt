@@ -276,7 +276,7 @@ internal object DatabaseMigrations {
         val catalogs = db.query("food_catalog", null, null, null, null, null, null).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    readFoodCatalog(cursor)?.let { add(it) }
+                    add(readFoodCatalog(cursor))
                 }
             }
         }

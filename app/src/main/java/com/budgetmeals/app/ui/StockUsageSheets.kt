@@ -1,7 +1,5 @@
 package com.budgetmeals.app.ui
 
-import com.budgetmeals.app.ui.icons.AppIcons
-
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -9,8 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,10 +18,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +43,7 @@ import com.budgetmeals.app.data.StockItem
 import com.budgetmeals.app.data.Units
 import com.budgetmeals.app.state.BudgetMath
 import com.budgetmeals.app.state.BudgetViewModel
+import com.budgetmeals.app.ui.icons.AppIcons
 import java.time.LocalDate
 import java.util.UUID
 
@@ -542,10 +541,9 @@ fun StockFormSheet(
 
                 val batchPackageLabel = when {
                     !isPackageEntry -> ""
-                    typedPackageSize > 0.0 && food != null && typedPackageSize != food.baseUnitsPerStockUnit ->
+                    typedPackageSize > 0.0 && typedPackageSize != food.baseUnitsPerStockUnit ->
                         "${Units.containerOf(typedUnit) ?: typedUnit} (${typedPackageSize.cleanNumber()}${food.baseUnit})"
-                    food?.packageLabel?.isNotBlank() == true -> food.packageLabel!!
-                    else -> typedUnit
+                    else -> food?.packageLabel?.takeIf { it.isNotBlank() } ?: typedUnit
                 }
                 val batchPackageSize = if (isPackageEntry) (packageFactor ?: 0.0) else 0.0
                 val usageHistory = when {
@@ -685,12 +683,18 @@ fun UsageFormSheet(
     }
     val valid = value > 0.0 && value <= remainingInCurrentUnit + 0.001
 
-    val subtitle = if (hasConversion) {
-        val totalPortions = item.remainingQuantity / perPortion!!
-        "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} (≈ ${totalPortions.cleanNumber()} ${catalog!!.portionUnit}) left · ${item.daysLabel}"
+    val convertedSubtitle = if (hasConversion) {
+        catalog?.let { food ->
+            perPortion?.let { portionSize ->
+                val totalPortions = item.remainingQuantity / portionSize
+                "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} (≈ ${totalPortions.cleanNumber()} ${food.portionUnit}) left · ${item.daysLabel}"
+            }
+        }
     } else {
-        "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} left · ${item.daysLabel}"
+        null
     }
+    val subtitle = convertedSubtitle
+        ?: "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} left · ${item.daysLabel}"
 
     SheetBody("Log use", subtitle, onDismiss) {
         if (item.isUsageEstimated && !item.isFinished) {
@@ -821,4 +825,3 @@ fun UsageFormSheet(
         }, enabled = valid, icon = AppIcons.Check)
     }
 }
-

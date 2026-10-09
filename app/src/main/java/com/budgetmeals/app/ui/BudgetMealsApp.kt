@@ -1,59 +1,50 @@
 package com.budgetmeals.app.ui
 
-import com.budgetmeals.app.ui.icons.AppIcons
-import androidx.compose.foundation.layout.size
-import androidx.compose.ui.unit.dp
-
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
-
+import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.core.content.FileProvider
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.togetherWith
-import androidx.activity.BackEventCompat
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -66,24 +57,23 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.time.Duration
-import java.time.LocalDateTime
-import java.time.LocalTime
 import com.budgetmeals.app.data.Expense
 import com.budgetmeals.app.data.FoodCatalogItem
 import com.budgetmeals.app.data.MealTemplate
@@ -91,11 +81,17 @@ import com.budgetmeals.app.data.MealType
 import com.budgetmeals.app.data.ShoppingItem
 import com.budgetmeals.app.data.StockItem
 import com.budgetmeals.app.notifications.ReminderScheduler
+import com.budgetmeals.app.state.BudgetViewModel
+import com.budgetmeals.app.ui.icons.AppIcons
 import com.budgetmeals.app.ui.theme.Motion
 import com.budgetmeals.app.ui.theme.extendedColors
-import com.budgetmeals.app.state.BudgetViewModel
-import java.io.File
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class MainTab(val route: String, val label: String) {
     HOME("home", "Home"),
@@ -151,7 +147,9 @@ fun BudgetMealsApp(
     var sheet by remember { mutableStateOf<AppSheet?>(null) }
     var sheetGeneration by remember { mutableIntStateOf(0) }
     var closingSheetGeneration by remember { mutableIntStateOf(-1) }
-    var lastHandledDayReviewRequest by rememberSaveable { mutableStateOf(0L) }
+    var lastHandledDayReviewRequest by rememberSaveable(saver = mutableLongStateSaver) {
+        mutableLongStateOf(0L)
+    }
     var csvToShare by remember { mutableStateOf<String?>(null) }
     var foodJsonToShare by remember { mutableStateOf<String?>(null) }
     var isPredictiveBackActive by remember { mutableStateOf(false) }
@@ -314,22 +312,14 @@ fun BudgetMealsApp(
     LaunchedEffect(csvToShare) {
         val csv = csvToShare ?: return@LaunchedEffect
         try {
-            val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val exportDirectory = File(context.cacheDir, "exports").apply { mkdirs() }
-                val exportFile = File(exportDirectory, "budgetmeals-${LocalDate.now()}.csv")
-                exportFile.writeText(csv)
-                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", exportFile)
-            }
-            context.startActivity(
-                Intent.createChooser(
-                    Intent(Intent.ACTION_SEND).apply {
-                        type = "text/csv"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, "BudgetMeals export")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    },
-                    "Share budget summary",
-                ),
+            shareExport(
+                context = context,
+                content = csv,
+                fileNamePrefix = "budgetmeals",
+                extension = "csv",
+                mimeType = "text/csv",
+                subject = "BudgetMeals export",
+                chooserTitle = "Share budget summary",
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -343,22 +333,14 @@ fun BudgetMealsApp(
     LaunchedEffect(foodJsonToShare) {
         val json = foodJsonToShare ?: return@LaunchedEffect
         try {
-            val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val exportDirectory = File(context.cacheDir, "exports").apply { mkdirs() }
-                val exportFile = File(exportDirectory, "budgetmeals-food-catalog-${LocalDate.now()}.json")
-                exportFile.writeText(json)
-                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", exportFile)
-            }
-            context.startActivity(
-                Intent.createChooser(
-                    Intent(Intent.ACTION_SEND).apply {
-                        type = "application/json"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, "BudgetMeals food catalog")
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    },
-                    "Share food catalog JSON",
-                ),
+            shareExport(
+                context = context,
+                content = json,
+                fileNamePrefix = "budgetmeals-food-catalog",
+                extension = "json",
+                mimeType = "application/json",
+                subject = "BudgetMeals food catalog",
+                chooserTitle = "Share food catalog JSON",
             )
         } catch (cancelled: CancellationException) {
             throw cancelled

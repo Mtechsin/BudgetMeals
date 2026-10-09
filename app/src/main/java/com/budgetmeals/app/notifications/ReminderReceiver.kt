@@ -18,7 +18,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val appContext = context.applicationContext
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val snapshot = BudgetRepository(appContext).loadSnapshot()
+                val snapshot = BudgetRepository(appContext).use { it.loadSnapshot() }
                 val summary = BudgetMath.dayMealSummary(snapshot, snapshot.today)
                 val lowStock = snapshot.lowStock.firstOrNull()
                 val mealMessage = if (summary.isClosed) {

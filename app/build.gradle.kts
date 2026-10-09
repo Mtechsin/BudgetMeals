@@ -1,3 +1,6 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,6 +21,15 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file(".signing/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
     }
 
@@ -52,6 +64,48 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+val verifyDevelopmentSigningKey = tasks.register("verifyDevelopmentSigningKey") {
+    group = "verification"
+    description = "Checks the shared development signing identity before packaging an APK."
+
+    val keyFile = rootProject.file(".signing/debug.keystore")
+    val expectedSha256 = "b6d4a214235923280758ca66a5ffe2604467a2cb2bf2f02f54566aa3b0082d28"
+    inputs.files(keyFile).withPropertyName("developmentKeystore")
+    inputs.property("expectedCertificateSha256", expectedSha256)
+
+    doLast {
+        if (!keyFile.isFile) {
+            throw GradleException(
+                "Missing .signing/debug.keystore. Copy the shared BudgetMeals development key " +
+                    "from your other laptop or private backup; see README.md. Do not generate a new key.",
+            )
+        }
+        val keyStore = try {
+            KeyStore.getInstance(keyFile, "android".toCharArray())
+        } catch (error: Exception) {
+            throw GradleException("Cannot read the shared development key. See README.md.", error)
+        }
+        val certificate = keyStore.getCertificate("androiddebugkey")
+            ?: throw GradleException("The shared development key is missing alias androiddebugkey.")
+        val actualSha256 = MessageDigest.getInstance("SHA-256")
+            .digest(certificate.encoded)
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        if (actualSha256 != expectedSha256) {
+            throw GradleException(
+                "Wrong BudgetMeals development signing key. Copy the original .signing/debug.keystore " +
+                    "from your other laptop or private backup; see README.md. " +
+                    "Changing the key would prevent updates to the installed app.",
+            )
+        }
+    }
+}
+
+tasks.matching {
+    it.name in setOf("validateSigningDebug", "validateSigningDebugAndroidTest", "validateSigningRelease")
+}.configureEach {
+    dependsOn(verifyDevelopmentSigningKey)
 }
 
 composeCompiler {

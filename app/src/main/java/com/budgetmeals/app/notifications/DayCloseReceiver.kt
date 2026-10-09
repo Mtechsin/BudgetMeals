@@ -5,13 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.budgetmeals.app.data.BudgetRepository
+import java.time.LocalDate
+import java.time.LocalTime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.LocalTime
 
 class DayCloseReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -26,7 +26,7 @@ class DayCloseReceiver : BroadcastReceiver() {
                     val now = LocalTime.now()
                     if (now.hour >= 23) LocalDate.now() else LocalDate.now().minusDays(1)
                 }
-                BudgetRepository(appContext).closeDay(date)
+                BudgetRepository(appContext).use { it.closeDay(date) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
