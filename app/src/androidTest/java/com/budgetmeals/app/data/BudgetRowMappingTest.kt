@@ -43,7 +43,7 @@ class BudgetRowMappingTest {
 
         val snapshot = database.loadSnapshot(BudgetSettings(), storage.today)
 
-        assertEquals(database.loadDayPlans(storage.today), snapshot.mealPlan(storage.today))
+        assertEquals(database.loadDayPlans(storage.today).sortedBy { it.mealType.ordinal }, snapshot.mealPlan(storage.today))
         assertEquals(MealType.entries.size, snapshot.mealPlan(storage.today).size)
         assertTrue(snapshot.mealPlan(storage.today).all { it.isCleared })
         assertTrue(BudgetMath.plannedMealsForDate(snapshot, storage.today).isEmpty())

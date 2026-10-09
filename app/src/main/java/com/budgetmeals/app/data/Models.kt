@@ -327,7 +327,10 @@ data class Expense(
     val isCorrection: Boolean = false,
     val recurringScheduleId: String? = null,
     val isBudgetTransfer: Boolean = false,
-)
+) {
+    val isMealExpense: Boolean
+        get() = id.startsWith(MealSpending.EXPENSE_PREFIX)
+}
 
 @Immutable
 data class MealLog(

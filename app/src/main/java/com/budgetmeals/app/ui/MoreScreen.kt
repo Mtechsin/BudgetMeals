@@ -52,7 +52,6 @@ fun MoreScreen(
         item {
             ScreenHeader(
                 title = "More",
-                subtitle = "Settings, appearance, and export",
             )
         }
 
@@ -73,7 +72,7 @@ fun MoreScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            "Food ${BudgetMath.money(snapshot.foodSpentThisMonth)} · spares ${BudgetMath.money(snapshot.sparesBalance)}",
+                            "Food ${BudgetMath.money(snapshot.foodSpentThisMonth)} Â· spares ${BudgetMath.money(snapshot.sparesBalance)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -147,15 +147,15 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         mutate("Food item deleted.") { repository.deleteFoodCatalogItem(item.id) }
     }
 
-    fun saveTemplate(template: MealTemplate) {
-        mutate("Meal saved.") {
+    fun saveTemplate(template: MealTemplate, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Meal saved.", onComplete) {
             repository.saveTemplate(template)
             rebuildOpenTodayPlan()
         }
     }
 
-    fun deleteTemplate(template: MealTemplate) {
-        mutate("Meal deleted.") {
+    fun deleteTemplate(template: MealTemplate, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Meal deleted.", onComplete) {
             repository.deleteTemplate(template.id)
             rebuildOpenTodayPlan()
         }
@@ -435,8 +435,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         val snapshot: AppSnapshot? = null,
     )
 
-    private fun mutate(message: String?, operation: suspend () -> Unit) {
-        launchMutation("Could not save that change. Please try again.") {
+    private fun mutate(
+        message: String?,
+        onComplete: (Boolean) -> Unit = {},
+        operation: suspend () -> Unit,
+    ) {
+        launchMutation("Could not save that change. Please try again.", onComplete) {
             operation()
             MutationUpdate(message = message)
         }
@@ -455,20 +459,26 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun launchMutation(
         fallbackMessage: String,
+        onComplete: (Boolean) -> Unit = {},
         operation: suspend () -> MutationUpdate,
     ) {
-        launchIo(fallbackMessage) {
+        launchIo(fallbackMessage, onComplete) {
             val update = operation()
             val snapshot = update.snapshot ?: repository.loadSnapshot()
             publishSnapshot(snapshot, update.message, update.preserveExistingMessage)
         }
     }
 
-    private fun launchIo(fallbackMessage: String, operation: suspend () -> Unit) {
+    private fun launchIo(
+        fallbackMessage: String,
+        onComplete: (Boolean) -> Unit = {},
+        operation: suspend () -> Unit,
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
-            mutationMutex.withLock {
+            val successful = mutationMutex.withLock {
                 runWithFailureHandling(fallbackMessage, operation)
             }
+            withContext(Dispatchers.Main.immediate) { onComplete(successful) }
         }
     }
 
@@ -483,9 +493,10 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun runWithFailureHandling(fallbackMessage: String, operation: suspend () -> Unit) {
-        try {
+    private suspend fun runWithFailureHandling(fallbackMessage: String, operation: suspend () -> Unit): Boolean {
+        return try {
             operation()
+            true
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -498,6 +509,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 null
             }
             publishSnapshot(refreshed ?: _uiState.value.snapshot, message, preserveExistingMessage = false)
+            false
         }
     }
 

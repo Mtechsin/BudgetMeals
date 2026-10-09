@@ -137,7 +137,6 @@ internal fun DayReviewSheet(
 
     SheetBody(
         title = if (wasClosed) "Review $dateLabel meals" else "Close $dateLabel meals",
-        subtitle = "Review and correct meals eaten, leftovers, or missed days.",
         onClose = onDismiss,
     ) {
         Text(
@@ -244,8 +243,8 @@ internal fun DayReviewSheet(
                         val availabilityText = when {
                             availability == null -> ""
                             availability.hasUsableStock ->
-                                " · ${availability.portions.cleanNumber()} available (${availability.baseQuantity.cleanNumber()} ${availability.baseUnit})"
-                            availability.note != null -> " · ${availability.note}"
+                                " Â· ${availability.portions.cleanNumber()} available (${availability.baseQuantity.cleanNumber()} ${availability.baseUnit})"
+                            availability.note != null -> " Â· ${availability.note}"
                             else -> ""
                         }
                         Text(
@@ -310,9 +309,9 @@ internal fun DayReviewSheet(
                     }
                     val subtitle = when (choice) {
                         MealReviewChoice.FULL -> "Consumed ${BudgetMath.money(consumed)}"
-                        MealReviewChoice.LEFTOVERS -> "Consumed ${BudgetMath.money(consumed)} · saved ${BudgetMath.money((template.cost - consumed).coerceAtLeast(0.0))}"
-                        MealReviewChoice.SKIPPED -> "Skipped · ${BudgetMath.money(template.cost)} not consumed"
-                        MealReviewChoice.UNRECORDED -> "Unrecorded · no meal record"
+                        MealReviewChoice.LEFTOVERS -> "Consumed ${BudgetMath.money(consumed)} Â· left over ${BudgetMath.money((template.cost - consumed).coerceAtLeast(0.0))}"
+                        MealReviewChoice.SKIPPED -> "Skipped Â· ${BudgetMath.money(template.cost)} not consumed"
+                        MealReviewChoice.UNRECORDED -> "Unrecorded Â· no meal record"
                     }
                     Text(
                         subtitle,
@@ -349,7 +348,7 @@ internal fun DayReviewSheet(
                     Text("Unrecorded / missed ${BudgetMath.money(unrecordedTotal)}", style = MaterialTheme.typography.bodySmall, color = TextMuted)
                 }
                 Text(
-                    "This records meal consumption and updates stock accordingly.",
+                    "Food from stock reduces inventory. The rest is added to this day's spending. Leftovers do not refund money spent.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
                     modifier = Modifier.padding(top = 4.dp),

@@ -172,6 +172,10 @@ internal object DatabaseMigrations {
         if (oldVersion < 12) {
             repairCurrentSchema(db)
         }
+        if (oldVersion < 13) {
+            // Use saved stock allocations; never consume inventory a second time during the upgrade.
+            MealExpenseLedger.backfill(db)
+        }
     }
 
     private fun repairCurrentSchema(db: SQLiteDatabase) {

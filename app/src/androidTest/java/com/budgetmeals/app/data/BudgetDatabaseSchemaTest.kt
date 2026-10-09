@@ -137,7 +137,7 @@ class BudgetDatabaseSchemaTest {
             listOf(cursor.getString(0), cursor.getString(1))
         }
         assertEquals(listOf("Saved lunch", "[]"), savedPlan)
-        assertEquals(12, upgraded.writableDatabase.version)
+        assertEquals(BudgetDao.DATABASE_VERSION, upgraded.writableDatabase.version)
         assertTrue(hasIndex(upgraded.writableDatabase, "meal_consumptions", "idx_meal_consumptions_log"))
         assertTrue(hasIndex(upgraded.writableDatabase, "meal_consumptions", "idx_meal_consumptions_catalog"))
         assertTrue(hasIndex(upgraded.writableDatabase, "meal_logs", "idx_meal_logs_date_type"))

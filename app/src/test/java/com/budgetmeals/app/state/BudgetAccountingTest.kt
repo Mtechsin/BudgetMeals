@@ -4,6 +4,7 @@ import com.budgetmeals.app.data.AppSnapshot
 import com.budgetmeals.app.data.Expense
 import com.budgetmeals.app.data.ExpenseCategory
 import com.budgetmeals.app.data.MealLog
+import com.budgetmeals.app.data.MealSpending
 import com.budgetmeals.app.data.MealStatus
 import com.budgetmeals.app.data.MealType
 import java.time.LocalDate
@@ -22,15 +23,23 @@ class BudgetAccountingTest {
     )
 
     @Test
-    fun markingAMealDoesNotChargeTheFoodBudgetAgain() {
+    fun linkedMealExpenseIsCountedOnceFromTheExpenseLedger() {
         val snapshot = AppSnapshot(
             today = today,
             categories = listOf(foodCategory),
             expenses = listOf(
                 Expense(categoryId = "food", amount = 100.0, date = today),
+                Expense(
+                    id = MealSpending.expenseId("lunch-1"),
+                    categoryId = "food",
+                    amount = 40.0,
+                    date = today,
+                    description = "Lunch",
+                ),
             ),
             mealLogs = listOf(
                 MealLog(
+                    id = "lunch-1",
                     actualTime = today.atTime(12, 0),
                     date = today,
                     mealType = MealType.LUNCH,
@@ -41,8 +50,8 @@ class BudgetAccountingTest {
             ),
         )
 
-        assertEquals(100.0, snapshot.foodSpentThisMonth, 0.001)
-        assertEquals(100.0, BudgetMath.foodSpentOn(today, snapshot), 0.001)
+        assertEquals(140.0, snapshot.foodSpentThisMonth, 0.001)
+        assertEquals(140.0, BudgetMath.foodSpentOn(today, snapshot), 0.001)
     }
 
     @Test

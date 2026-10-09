@@ -1,4 +1,4 @@
-package com.budgetmeals.app.ui
+﻿package com.budgetmeals.app.ui
 
 import com.budgetmeals.app.ui.icons.AppIcons
 
@@ -84,7 +84,7 @@ fun StockScreen(
         item(key = "header") {
             ScreenHeader(
                 title = "Stock",
-                subtitle = "${activeStock.size} pantry items · daily burn tracking",
+                subtitle = "${activeStock.size} pantry items",
             )
         }
 
@@ -255,14 +255,14 @@ fun StockScreen(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             title = {
                 Text(
-                    text = "Log use · ${dateUsageTarget.name}",
+                    text = "Log use Â· ${dateUsageTarget.name}",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 )
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "${dateUsageTarget.remainingQuantity.cleanNumber()} ${dateUsageTarget.unit} left · ${dateUsageTarget.daysLabel}",
+                        text = "${dateUsageTarget.remainingQuantity.cleanNumber()} ${dateUsageTarget.unit} left Â· ${dateUsageTarget.daysLabel}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

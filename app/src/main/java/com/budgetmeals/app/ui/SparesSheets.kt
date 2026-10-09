@@ -33,7 +33,7 @@ internal fun SparesFormSheet(snapshot: AppSnapshot, viewModel: BudgetViewModel, 
     var category by remember { mutableStateOf("other") }
     val value = amount.asDouble()
     val valid = value > 0.0 && (!spend || value <= snapshot.sparesBalance)
-    SheetBody(if (spend) "Spend from spares" else "Add to spares", "A reward, not a punishment.", onDismiss) {
+    SheetBody(if (spend) "Spend from spares" else "Add to spares", null, onDismiss) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(vertical = 4.dp),

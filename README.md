@@ -16,7 +16,7 @@ BudgetMeals is a native Android app built with Kotlin and Jetpack Compose. It is
 - Linked stock is reduced when a meal is marked eaten or saved in the day review, using FIFO stock batches
 - Purchase price and category are locked after saving so the cash ledger stays accurate; corrections happen through Recalculate
 - Meal plan window covers seven days starting on the current day
-- Cash budget based on food purchases once, without charging meal check-ins again
+- Cash budget includes meal spending after crediting ingredients covered by available stock
 - Budget correction tool for forgotten spending or matching the app to the month's real total
 - Expense tracker for food, internet, calling, household, and custom categories
 - Spares account with save and spend transactions, treat affordability, and streaks
@@ -57,15 +57,17 @@ Android's [app signing documentation](https://developer.android.com/studio/publi
 Run local unit tests, Android lint, and compile the instrumentation tests without a device:
 
 ```powershell
-.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleUiTestAndroidTest
 ```
 
 Unit test reports are in `app/build/reports/tests/testDebugUnitTest/`; lint reports are in `app/build/reports/lint-results-debug.html`.
 
-When an emulator or device is available, run the database and repository regression tests:
+When an emulator or device is available, run the UI, database, and repository regression tests:
+
+Device tests target `com.budgetmeals.app.uitest`, a separate application from the installed release. The runner also leaves the test APKs installed after the run. Tests never replace or uninstall `com.budgetmeals.app`.
 
 ```powershell
-.\gradlew.bat :app:connectedDebugAndroidTest
+.\gradlew.bat :app:connectedUiTestAndroidTest
 ```
 
 Instrumentation tests use a shared `BudgetStorageRule` to isolate their database and preferences, close every opened connection, and delete their test data. Date-sensitive tests use fixed dates; `BudgetRepository` accepts a `Clock` for repeatable day calculations and timestamps.
@@ -85,7 +87,9 @@ Instrumentation tests use a shared `BudgetStorageRule` to isolate their database
 3. Leave **Remember for the next shop** on.
 4. Save. The purchase is counted as food spending, added to stock, and added to the shopping list.
 
-For a meal already in stock, use the meal plan and tap the check mark. That records consumption only. The purchase remains the money event, so the meal is not charged twice. For a one-off street meal, add it as a purchase with `piece` or `plate` as the unit.
+When you mark a planned meal as eaten, the app records a food expense for the part not covered by available stock. It uses linked stock first and charges only uncovered ingredients, so food already counted when purchased is not charged again. For example, if a meal costs EGP 100 and its ingredients are estimated at EGP 20 of rice and EGP 80 of chicken, with half the rice and all the chicken available in stock, the meal adds EGP 10 to cash spending. A meal with all ingredients in stock adds no second charge. For takeaway or street food, mark the meal as eaten and enter its price as the meal cost.
+
+Saving an edit recalculates the same meal expense and its stock use; repeated saves do not add duplicate expenses. Undoing or deleting a meal removes its linked expense and restores its recorded stock use. A meal marked partial still uses the full recipe or purchased-meal cost because the ingredients were already used; leftovers do not refund cash spending. Meals with no ingredient rows, including legacy meals that cannot be matched to ingredients, use their full saved cost.
 
 At 10 PM, the reminder opens the day review. Meals left unmarked default to skipped. The app also closes the day automatically at 11:59 PM, and catches up any older open plan the next time it loads. Linked food components reduce their stock quantity when a meal is marked eaten or when the review is saved. A component without a stock link stays visible in the meal and records a shortage instead of silently changing inventory.
 
@@ -95,7 +99,9 @@ If spending was missed or entered twice, use **Match real spending** on Home or 
 
 Open **Plan**, add or edit a meal, then add each food as its own row. Search the catalog or type a name and choose **Add to food catalog**. In a stock item, choose the same catalog food and set how many portions are in one stock unit. For example, a tomato catalog item can use `1 g = 0.01 piece`; a meal that uses two pieces removes `200 g` from a kilogram stock batch. If the stock unit is kilograms, enter `10` instead.
 
-The catalog is stored locally. Purchases remain the cash-budget event. Meal check-ins and day reviews only update consumption and linked stock quantities.
+The catalog is stored locally. Purchases and the uncovered portion of eaten meals appear in the cash ledger. Meal check-ins and day reviews use linked stock first, then record spending for any uncovered food.
+
+On upgrade, existing meal expenses are backfilled from each meal's saved stock allocations without deducting that stock a second time. When prices are available for all ingredients, the app uses their proportions to calculate the uncovered share of the saved meal cost. If any ingredient price is missing, it instead credits the recorded value of stock used against the saved meal cost.
 
 ## Food catalog JSON and AI population
 

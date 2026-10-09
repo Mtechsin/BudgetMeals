@@ -41,7 +41,7 @@ internal fun SettingsSheet(settings: BudgetSettings, viewModel: BudgetViewModel,
     var reminders by remember { mutableStateOf(settings.remindersEnabled) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     val valid = monthly.asDouble() > 0 && daily.asDouble() > 0 && weekly.asDouble() > 0
-    SheetBody("Settings", "Change the numbers when prices change.", onDismiss) {
+    SheetBody("Settings", null, onDismiss) {
         FormSectionTitle("Appearance")
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),

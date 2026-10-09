@@ -308,7 +308,8 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("is_custom", if (template.isCustom) 1 else 0)
             put("components_json", MealDataCodec.encodeComponents(template.components))
         }
-        writableDatabase.insertWithOnConflict("meal_templates", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        val inserted = writableDatabase.insertWithOnConflict("meal_templates", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(inserted != -1L) { "Could not save the meal. Please try again." }
     }
 
     fun deleteTemplate(id: String) {
@@ -340,28 +341,32 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         val db = writableDatabase
         db.beginTransaction()
         try {
-            logs.forEach { log ->
-                val previousIds = db.rawQuery(
+            val replacedIds = logs.flatMap { log ->
+                db.rawQuery(
                     "SELECT id FROM meal_logs WHERE date = ? AND meal_type = ?",
                     arrayOf(log.date.toEpochDay().toString(), log.mealType.name),
                 ).use { cursor ->
                     buildList {
                         while (cursor.moveToNext()) add(cursor.getString(0))
                     }
-                }
-                previousIds.filter { it != log.id }.forEach { previousId ->
-                    reverseMealConsumption(db, previousId)
-                    db.delete("meal_logs", "id = ?", arrayOf(previousId))
-                }
+                }.filter { it != log.id }
+            }.distinct()
+            // Restore every meal in the review first, so one meal can use stock released by another.
+            (replacedIds + logs.map { it.id }).distinct().forEach { logId ->
+                reverseMealConsumption(db, logId)
+                MealExpenseLedger.delete(db, logId)
+            }
+            replacedIds.forEach { db.delete("meal_logs", "id = ?", arrayOf(it)) }
+            logs.sortedWith(compareBy<MealLog>({ it.date }, { it.mealType.ordinal })).forEach { log ->
                 val updated = db.update("meal_logs", mealLogValues(log), "id = ?", arrayOf(log.id))
-                if (updated == 0) db.insert("meal_logs", null, mealLogValues(log))
-                reverseMealConsumption(db, log.id)
+                if (updated == 0) db.insertOrThrow("meal_logs", null, mealLogValues(log))
                 applyMealConsumption(db, log)
+                MealExpenseLedger.sync(db, log)
             }
             if (closure != null) {
                 val values = dayClosureValues(closure)
                 val updated = db.update("day_closures", values, "date = ?", arrayOf(closure.date.toEpochDay().toString()))
-                if (updated == 0) db.insert("day_closures", null, values)
+                if (updated == 0) db.insertOrThrow("day_closures", null, values)
             }
             db.setTransactionSuccessful()
         } finally {
@@ -435,7 +440,10 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             val requestedPortions = component.quantity
             if (requestedPortions <= 0.0) return@forEach
             val catalogId = component.catalogId
-            val catalog = catalogId?.let { loadFoodCatalog(db, it) }
+            val catalog = catalogId?.let { loadFoodCatalog(db, it) } ?: db.query(
+                "food_catalog", null, "TRIM(name) = ? COLLATE NOCASE", arrayOf(component.name.trim()),
+                null, null, null, "1",
+            ).use { cursor -> if (cursor.moveToFirst()) readFoodCatalog(cursor) else null }
             if (catalog == null || !catalog.hasUsableConversion) {
                 insertConsumption(
                     db = db,
@@ -470,7 +478,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 "stock",
                 arrayOf("id", "unit", "total_quantity", "consumed_quantity"),
                 "catalog_id = ? AND consumed_quantity < total_quantity AND purchase_date <= ? " +
-                    "AND (expiry_date IS NULL OR expiry_date <= 0 OR expiry_date >= ?)",
+                    "AND conversion_known = 1 AND (expiry_date IS NULL OR expiry_date <= 0 OR expiry_date >= ?)",
                 arrayOf(catalog.id, log.date.toEpochDay().toString(), log.date.toEpochDay().toString()),
                 null,
                 null,
@@ -547,7 +555,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         stockUnit: String?,
         stockId: String?,
     ) {
-        db.insert("meal_consumptions", null, ContentValues().apply {
+        db.insertOrThrow("meal_consumptions", null, ContentValues().apply {
             put("id", UUID.randomUUID().toString())
             put("log_id", logId)
             put("component_id", component.id)
@@ -587,6 +595,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         db.beginTransaction()
         try {
             reverseMealConsumption(db, id)
+            MealExpenseLedger.delete(db, id)
             db.delete("meal_logs", "id = ?", arrayOf(id))
             if (date != null) db.delete("day_closures", "date = ?", arrayOf(date.toEpochDay().toString()))
             db.setTransactionSuccessful()
@@ -847,6 +856,6 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
     companion object {
         const val DATABASE_NAME = "budget_meals.db"
-        const val DATABASE_VERSION = 12
+        const val DATABASE_VERSION = 13
     }
 }

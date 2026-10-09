@@ -56,7 +56,6 @@ fun ExpensesScreen(
         item {
             ScreenHeader(
                 title = "Expenses",
-                subtitle = "Food, internet, calling, and your own categories",
                 onBack = onBack,
                 action = {
                     IconButton(onClick = onAddExpense) { Icon(AppIcons.Add, contentDescription = "Add expense") }
@@ -218,13 +217,20 @@ private fun ExpenseRow(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(expense.description.ifBlank { category?.name ?: "Expense" }, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text("${category?.name ?: "Other"} · ${BudgetMath.formatDate(expense.date)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (expense.isMealExpense) "${BudgetMath.formatDate(expense.date)} Â· Change through meal review"
+                    else "${category?.name ?: "Other"} Â· ${BudgetMath.formatDate(expense.date)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Text(BudgetMath.money(expense.amount), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-            if (!expense.isCorrection) {
+            if (!expense.isCorrection && !expense.isMealExpense) {
                 IconButton(onClick = onEdit) { Icon(AppIcons.Edit, contentDescription = "Edit expense", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-            IconButton(onClick = onDelete) { Icon(AppIcons.Delete, contentDescription = "Delete expense", tint = MaterialTheme.colorScheme.error) }
+            if (!expense.isMealExpense) {
+                IconButton(onClick = onDelete) { Icon(AppIcons.Delete, contentDescription = "Delete expense", tint = MaterialTheme.colorScheme.error) }
+            }
         }
     }
 }

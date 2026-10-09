@@ -76,7 +76,6 @@ internal fun BudgetCorrectionSheet(
 
     SheetBody(
         title = "Match real spending",
-        subtitle = "Fix the budget when something was missed or entered twice.",
         onClose = onDismiss,
     ) {
         Card(
@@ -233,7 +232,7 @@ private fun BudgetCorrectionRow(expense: Expense, onDelete: () -> Unit) {
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "${BudgetMath.formatDate(expense.date)} · ${expense.description}",
+                "${BudgetMath.formatDate(expense.date)} Â· ${expense.description}",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 maxLines = 2,
