@@ -1,4 +1,4 @@
-package com.budgetmeals.app.ui
+﻿package com.budgetmeals.app.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
@@ -343,7 +343,7 @@ private fun BudgetHero(
             contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
             colors = ButtonDefaults.textButtonColors(contentColor = onContainer),
         ) {
-            Text("Numbers look off? Match real spending", style = MaterialTheme.typography.labelMedium)
+            Text("Match real spending", style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -490,7 +490,7 @@ private fun MealRow(
                         ) {
                             when {
                                 fullyEaten -> StatusPill("Eaten", primary)
-                                hasLeftovers -> StatusPill("${BudgetMath.money(log?.leftoverCost ?: 0.0)} saved", MaterialTheme.colorScheme.secondary)
+                                hasLeftovers -> StatusPill("${BudgetMath.money(log?.leftoverCost ?: 0.0)} left over", MaterialTheme.colorScheme.secondary)
                                 skipped -> StatusPill("Skipped", MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             if (shortages.isNotEmpty() && !fullyEaten && !hasLeftovers) {

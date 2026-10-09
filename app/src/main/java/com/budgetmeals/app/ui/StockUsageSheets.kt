@@ -109,7 +109,7 @@ fun StockFormSheet(
 
     SheetBody(
         title = if (existing == null) "Bought something" else "Edit stock item",
-        subtitle = if (existing == null) "Enter the block once. The calculator handles the rest." else "${existing.remainingQuantity.cleanNumber()} ${existing.unit} left · ${existing.daysLabel}",
+        subtitle = if (existing == null) null else "${existing.remainingQuantity.cleanNumber()} ${existing.unit} left • ${existing.daysLabel}",
         onClose = onDismiss,
     ) {
         if (existing?.isUsageEstimated == true && !existing.isFinished) {
@@ -130,7 +130,7 @@ fun StockFormSheet(
                         color = AccentMintLight,
                     )
                     Text(
-                        "· Estimated rate until usage is logged on 2+ days",
+                        "Â· Estimated rate until usage is logged on 2+ days",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                     )
@@ -303,7 +303,7 @@ fun StockFormSheet(
                                     color = AccentMintLight,
                                 )
                                 Text(
-                                    "1 ${selectedFood.stockUnit} (${jg.cleanNumber()}g) ≈ ${spoonsInJar.cleanNumber()} ${spoonsM.spoonUnitName}s · ${if (spoonCost > 0) "${BudgetMath.money(spoonCost)} / ${spoonsM.spoonUnitName}" else "Enter price below"}",
+                                    "1 ${selectedFood.stockUnit} (${jg.cleanNumber()}g) â‰ˆ ${spoonsInJar.cleanNumber()} ${spoonsM.spoonUnitName}s Â· ${if (spoonCost > 0) "${BudgetMath.money(spoonCost)} / ${spoonsM.spoonUnitName}" else "Enter price below"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextPrimary,
                                     fontWeight = FontWeight.Medium,
@@ -326,7 +326,7 @@ fun StockFormSheet(
                                     color = AccentMintLight,
                                 )
                                 Text(
-                                    "${parsedQuantity.cleanNumber()}g ≈ ${totalSpoons.cleanNumber()} ${spoonsM.spoonUnitName}s · ${if (spoonCost > 0) "${BudgetMath.money(spoonCost)} / ${spoonsM.spoonUnitName}" else "Enter price below"}",
+                                    "${parsedQuantity.cleanNumber()}g â‰ˆ ${totalSpoons.cleanNumber()} ${spoonsM.spoonUnitName}s Â· ${if (spoonCost > 0) "${BudgetMath.money(spoonCost)} / ${spoonsM.spoonUnitName}" else "Enter price below"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextPrimary,
                                     fontWeight = FontWeight.Medium,
@@ -378,13 +378,13 @@ fun StockFormSheet(
                         val conversionText = if (buyInPortion) {
                             val equivBase = parsedQuantity * pps
                             val unitCost = if (parsedPrice > 0 && parsedQuantity > 0) parsedPrice / parsedQuantity else 0.0
-                            "${parsedQuantity.cleanNumber()} ${selectedFood.portionUnit} ≈ ${equivBase.cleanNumber()} ${selectedFood.baseUnit} · Tracked as ${equivBase.cleanNumber()} ${selectedFood.baseUnit} in stock${if (unitCost > 0) " (${BudgetMath.money(unitCost)} / ${selectedFood.portionUnit})" else ""}"
+                            "${parsedQuantity.cleanNumber()} ${selectedFood.portionUnit} â‰ˆ ${equivBase.cleanNumber()} ${selectedFood.baseUnit} Â· Tracked as ${equivBase.cleanNumber()} ${selectedFood.baseUnit} in stock${if (unitCost > 0) " (${BudgetMath.money(unitCost)} / ${selectedFood.portionUnit})" else ""}"
                         } else {
                             val equivPortions = selectedFood.baseUnitsPerStockUnit.takeIf { it > 0.0 }
                                 ?.let { parsedQuantity * selectedFood.baseUnitsPerStockUnit / pps }
                                 ?: (parsedQuantity / pps)
                             val unitCost = if (parsedPrice > 0 && equivPortions > 0) parsedPrice / equivPortions else 0.0
-                            "${parsedQuantity.cleanNumber()} $unit ≈ ${equivPortions.cleanNumber()} ${selectedFood.portionUnit}${if (unitCost > 0) " · ${BudgetMath.money(unitCost)} / ${selectedFood.portionUnit}" else ""}"
+                            "${parsedQuantity.cleanNumber()} $unit â‰ˆ ${equivPortions.cleanNumber()} ${selectedFood.portionUnit}${if (unitCost > 0) " Â· ${BudgetMath.money(unitCost)} / ${selectedFood.portionUnit}" else ""}"
                         }
 
                         FoodKindSummary(conversionText, icon = AppIcons.Sync)
@@ -472,7 +472,7 @@ fun StockFormSheet(
                 } else {
                     previewUnit
                 }
-                "${BudgetMath.money(costPerUnit, 2)} per $hintUnit · ${if (days >= 999) "days left needs a daily use" else "${days.toInt()} days left"} · ${BudgetMath.money(costPerUnit * effectiveUsage, 1)}/day"
+                "${BudgetMath.money(costPerUnit, 2)} per $hintUnit Â· ${if (days >= 999) "days left needs a daily use" else "${days.toInt()} days left"} Â· ${BudgetMath.money(costPerUnit * effectiveUsage, 1)}/day"
             } else {
                 "Name, quantity, and price are enough to start."
             },
@@ -687,14 +687,14 @@ fun UsageFormSheet(
         catalog?.let { food ->
             perPortion?.let { portionSize ->
                 val totalPortions = item.remainingQuantity / portionSize
-                "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} (≈ ${totalPortions.cleanNumber()} ${food.portionUnit}) left · ${item.daysLabel}"
+                "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} (â‰ˆ ${totalPortions.cleanNumber()} ${food.portionUnit}) left Â· ${item.daysLabel}"
             }
         }
     } else {
         null
     }
     val subtitle = convertedSubtitle
-        ?: "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} left · ${item.daysLabel}"
+        ?: "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} left Â· ${item.daysLabel}"
 
     SheetBody("Log use", subtitle, onDismiss) {
         if (item.isUsageEstimated && !item.isFinished) {
@@ -715,7 +715,7 @@ fun UsageFormSheet(
                         color = AccentMintLight,
                     )
                     Text(
-                        "· Estimated rate until usage is logged on 2+ days",
+                        "Â· Estimated rate until usage is logged on 2+ days",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                     )
@@ -782,9 +782,9 @@ fun UsageFormSheet(
         val useLabel = when {
             perPortion != null && usePortionUnit -> {
                 val baseEquiv = value * perPortion
-                "${value.cleanNumber()} ${currentUnit} (≈ ${baseEquiv.cleanNumber()} ${item.unit}) · ${(pctUsed * 100).toInt()}% of remaining"
+                "${value.cleanNumber()} ${currentUnit} (â‰ˆ ${baseEquiv.cleanNumber()} ${item.unit}) Â· ${(pctUsed * 100).toInt()}% of remaining"
             }
-            else -> "${value.cleanNumber()} ${currentUnit} · ${(pctUsed * 100).toInt()}% of remaining"
+            else -> "${value.cleanNumber()} ${currentUnit} Â· ${(pctUsed * 100).toInt()}% of remaining"
         }
         Slider(
             value = sliderVal,
@@ -805,7 +805,7 @@ fun UsageFormSheet(
             val portionForHint = if (usePortionUnit) perPortion else null
             if (portionForHint != null) {
                 val newBase = (item.remainingQuantity - value * portionForHint).coerceAtLeast(0.0)
-                "New remaining: ${newRemaining.cleanNumber()} $currentUnit (≈ ${newBase.cleanNumber()} ${item.unit})."
+                "New remaining: ${newRemaining.cleanNumber()} $currentUnit (â‰ˆ ${newBase.cleanNumber()} ${item.unit})."
             } else {
                 "New remaining: ${newRemaining.cleanNumber()} ${item.unit}. This helps the next estimate."
             }

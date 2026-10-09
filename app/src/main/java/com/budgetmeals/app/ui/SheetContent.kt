@@ -10,6 +10,7 @@ fun SheetContent(
     viewModel: BudgetViewModel,
     snapshot: AppSnapshot,
     onDismiss: () -> Unit,
+    onDismissGuardChanged: ((() -> Unit)?) -> Unit = {},
 ) {
     when (sheet) {
         AppSheet.QuickAdd -> Unit // Rendered by BudgetMealsApp (needs to swap to another sheet)
@@ -21,8 +22,8 @@ fun SheetContent(
         AppSheet.AddCategory -> CategoryFormSheet(viewModel, onDismiss)
         AppSheet.AddFoodItem -> FoodItemFormSheet(null, snapshot, viewModel, onDismiss)
         is AppSheet.EditFoodItem -> FoodItemFormSheet(sheet.item, snapshot, viewModel, onDismiss)
-        AppSheet.AddTemplate -> TemplateFormSheet(null, snapshot, viewModel, onDismiss)
-        is AppSheet.EditTemplate -> TemplateFormSheet(sheet.template, snapshot, viewModel, onDismiss)
+        AppSheet.AddTemplate -> TemplateFormSheet(null, snapshot, viewModel, onDismiss, onDismissGuardChanged)
+        is AppSheet.EditTemplate -> TemplateFormSheet(sheet.template, snapshot, viewModel, onDismiss, onDismissGuardChanged)
         is AppSheet.AssignDayMeal -> AssignDayMealSheet(sheet.date, sheet.mealType, sheet.currentTemplate, snapshot, viewModel, onDismiss)
         AppSheet.AddShopping -> ShoppingFormSheet(null, viewModel, onDismiss)
         is AppSheet.EditShopping -> ShoppingFormSheet(sheet.item, viewModel, onDismiss)

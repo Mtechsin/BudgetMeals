@@ -41,7 +41,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -52,6 +51,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SheetValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -144,8 +144,8 @@ fun BudgetMealsApp(
         pageCount = { MainTab.entries.size },
     )
     var detailRoute by rememberSaveable { mutableStateOf<String?>(null) }
-    var sheet by remember { mutableStateOf<AppSheet?>(null) }
-    var sheetGeneration by remember { mutableIntStateOf(0) }
+    var sheet by rememberSaveable(stateSaver = mealEditorSheetSaver) { mutableStateOf<AppSheet?>(null) }
+    var sheetGeneration by rememberSaveable { mutableIntStateOf(0) }
     var closingSheetGeneration by remember { mutableIntStateOf(-1) }
     var lastHandledDayReviewRequest by rememberSaveable(saver = mutableLongStateSaver) {
         mutableLongStateOf(0L)
@@ -663,8 +663,17 @@ fun BudgetMealsApp(
         }
     }
 
+    var sheetDismissGuard by remember(sheetGeneration) { mutableStateOf<(() -> Unit)?>(null) }
     val sheetState = key(sheetGeneration) {
-        rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            confirmValueChange = { nextValue ->
+                if (nextValue == SheetValue.Hidden && sheetDismissGuard != null && closingSheetGeneration != sheetGeneration) {
+                    sheetDismissGuard?.invoke()
+                    false
+                } else true
+            },
+        )
     }
     val sheetScope = rememberCoroutineScope()
     val closeSheet: () -> Unit = close@{
@@ -690,15 +699,17 @@ fun BudgetMealsApp(
 
     sheet?.let { currentSheet ->
         val generationAtPresentation = sheetGeneration
-        ModalBottomSheet(
+        ScrollAwareModalBottomSheet(
             onDismissRequest = {
                 if (sheetGeneration == generationAtPresentation && sheet === currentSheet) {
-                    sheetGeneration += 1
-                    sheet = null
+                    val dismissGuard = sheetDismissGuard
+                    if (dismissGuard != null) dismissGuard() else {
+                        sheetGeneration += 1
+                        sheet = null
+                    }
                 }
             },
             sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
             AnimatedContent(
                 targetState = currentSheet,
@@ -720,6 +731,11 @@ fun BudgetMealsApp(
                         viewModel = viewModel,
                         snapshot = uiState.snapshot,
                         onDismiss = closeSheet,
+                        onDismissGuardChanged = { guard ->
+                            if (sheetGeneration == generationAtPresentation && sheet === activeSheet) {
+                                sheetDismissGuard = guard
+                            }
+                        },
                     )
                 }
             }

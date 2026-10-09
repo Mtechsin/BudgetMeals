@@ -380,12 +380,14 @@ class BudgetRepository(
     }
 
     fun saveExpense(expense: Expense) {
+        require(!expense.isMealExpense) { "Change this meal's spending through meal review." }
         database.upsertExpense(expense.copy(
             recurringScheduleId = expense.recurringScheduleId ?: if (expense.isRecurring) expense.id else null,
         ))
     }
 
     fun deleteExpense(id: String) {
+        require(!id.startsWith(MealSpending.EXPENSE_PREFIX)) { "Undo this meal through meal review to remove its spending." }
         database.deleteExpense(id)
     }
 

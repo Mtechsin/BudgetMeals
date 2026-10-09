@@ -61,7 +61,6 @@ fun SparesScreen(
         item {
             ScreenHeader(
                 title = "Spares",
-                subtitle = "Leftover money becomes a treat, not a lecture",
                 onBack = onBack,
                 action = {
                     IconButton(onClick = onAddSpares) {
@@ -94,7 +93,7 @@ fun SparesScreen(
                     )
                     if (streak > 0) {
                         StatusPill(
-                            text = "$streak day streak 🔥",
+                            text = "$streak day streak ðŸ”¥",
                             color = MaterialTheme.colorScheme.secondary,
                         )
                     }

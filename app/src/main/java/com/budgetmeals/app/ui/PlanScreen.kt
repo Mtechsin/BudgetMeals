@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -73,6 +74,7 @@ fun PlanScreen(
         mutableLongStateOf(today.toEpochDay())
     }
     var selectedDateEpoch by rememberSaveable { mutableStateOf<Long?>(null) }
+    var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
     var lastObservedToday by remember { mutableStateOf(today) }
     val planStart = LocalDate.ofEpochDay(planStartEpoch)
 
@@ -322,10 +324,30 @@ fun PlanScreen(
                     snapshot = snapshot,
                     template = template,
                     onEdit = { onEditTemplate(template) },
-                    onDelete = { onDeleteTemplate(template) },
+                    onDelete = { pendingDeleteId = template.id },
                 )
             }
         }
+    }
+
+    snapshot.templates.firstOrNull { it.id == pendingDeleteId }?.let { template ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteId = null },
+            title = { Text("Delete meal?") },
+            text = { Text("Remove \"${template.name}\" from your saved meals? Your recorded meals will stay in your history.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeleteId = null
+                        onDeleteTemplate(template)
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Delete meal") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteId = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -901,4 +923,3 @@ private fun MealTemplateRow(
         }
     }
 }
-

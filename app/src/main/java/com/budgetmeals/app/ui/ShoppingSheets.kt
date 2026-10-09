@@ -43,7 +43,7 @@ internal fun ShoppingFormSheet(existing: ShoppingItem?, viewModel: BudgetViewMod
     var category by rememberSaveable { mutableStateOf(existing?.category ?: ItemCategory.FOOD_STAPLE) }
     var note by rememberSaveable { mutableStateOf(existing?.note.orEmpty()) }
     val valid = name.isNotBlank() && quantity.asDouble() > 0.0
-    SheetBody(if (existing == null) "Add to shopping" else "Edit shopping item", "The list is shared with your stock habits.", onDismiss) {
+    SheetBody(if (existing == null) "Add to shopping" else "Edit shopping item", null, onDismiss) {
         FormSectionTitle("Item")
         BudgetTextField(name, { name = it }, label = "Item")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
@@ -98,7 +98,7 @@ internal fun BuyShoppingSheet(item: ShoppingItem, viewModel: BudgetViewModel, on
     var price by remember(item.id) { mutableStateOf(if (item.priceKnown && item.estimatedPrice > 0.0) item.estimatedPrice.cleanNumber() else "") }
     var remember by remember(item.id) { mutableStateOf(false) }
     val valid = price.isNotBlank() && price.asDouble() >= 0.0
-    SheetBody("Buy ${item.name}", "One tap saves it to stock, spending, and the next list if you want.", onDismiss) {
+    SheetBody("Buy ${item.name}", null, onDismiss) {
         FormSectionTitle("Purchase price")
         NumberField(price, { price = it }, "Actual price", prefix = "EGP ")
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 12.dp)) {

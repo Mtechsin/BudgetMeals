@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.budgetmeals.app.ui
 
 import androidx.compose.foundation.BorderStroke
@@ -5,11 +7,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -17,10 +22,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -32,26 +38,34 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.budgetmeals.app.data.FoodCatalogItem
-import com.budgetmeals.app.data.FoodMeasurementCodec
 import com.budgetmeals.app.data.FoodMeasurementType
 import com.budgetmeals.app.data.ItemCategory
 import com.budgetmeals.app.data.MealComponent
@@ -65,965 +79,486 @@ import com.budgetmeals.app.ui.icons.AppIcons
 import java.time.DayOfWeek
 import java.util.UUID
 
+private enum class MealPriceMode { INGREDIENTS, MANUAL }
+
+private val mealTypeSaver = Saver<MealType, String>(
+    save = { it.name }, restore = { runCatching { MealType.valueOf(it) }.getOrDefault(MealType.LUNCH) },
+)
+private val daySaver = Saver<DayOfWeek?, String>(
+    save = { it?.name.orEmpty() }, restore = { it.takeIf(String::isNotBlank)?.let { value -> runCatching { DayOfWeek.valueOf(value) }.getOrNull() } },
+)
+private val componentsSaver = Saver<List<MealComponent>, String>(
+    save = { MealDataCodec.encodeComponents(it) }, restore = { MealDataCodec.decodeComponents(it) },
+)
+private val priceModeSaver = Saver<MealPriceMode, String>(
+    save = { it.name }, restore = { runCatching { MealPriceMode.valueOf(it) }.getOrDefault(MealPriceMode.INGREDIENTS) },
+)
+
 @Composable
 internal fun TemplateFormSheet(
     existing: MealTemplate?,
     snapshot: com.budgetmeals.app.data.AppSnapshot,
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
+    onDismissGuardChanged: ((() -> Unit)?) -> Unit = {},
 ) {
+    val focusManager = LocalFocusManager.current
+    val scrollState = rememberScrollState()
     val draft by viewModel.builderDraft.collectAsState()
-    val startingComponents = if (existing != null) {
-        existing.components.ifEmpty { MealDataCodec.legacyComponents(existing.notes) }
+    val initialComponents = remember(existing?.id) {
+        existing?.let { it.components.ifEmpty { MealDataCodec.legacyComponents(it.notes) } } ?: draft.components
+    }
+    val initialIngredientTotal = initialComponents.sumOf { it.estimatedCost }
+    val existingHasManualTotal = existing != null && existing.cost != initialIngredientTotal
+    val newHasManualDraft = existing == null && draft.cost.asDoubleOrNull()?.let { it > 0.0 } == true
+    var newId by rememberSaveable(existing?.id) { mutableStateOf(existing?.id ?: UUID.randomUUID().toString()) }
+
+    var name by rememberSaveable(existing?.id) { mutableStateOf(existing?.name ?: draft.name) }
+    var type by rememberSaveable(existing?.id, stateSaver = mealTypeSaver) { mutableStateOf(existing?.mealType ?: draft.mealType) }
+    var manualCost by rememberSaveable(existing?.id) {
+        mutableStateOf(existing?.let { if (it.cost == 0.0) "" else it.cost.cleanNumber() } ?: draft.cost)
+    }
+    var recurring by rememberSaveable(existing?.id) { mutableStateOf(existing?.isRecurring ?: draft.isRecurring) }
+    var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes ?: draft.notes) }
+    var day by rememberSaveable(existing?.id, stateSaver = daySaver) { mutableStateOf(if (existing != null) existing.dayOfWeek else draft.dayOfWeek) }
+    var components by rememberSaveable(existing?.id, stateSaver = componentsSaver) { mutableStateOf(initialComponents) }
+    var pricingMode by rememberSaveable(existing?.id, stateSaver = priceModeSaver) {
+        mutableStateOf(if (existingHasManualTotal || newHasManualDraft) MealPriceMode.MANUAL else MealPriceMode.INGREDIENTS)
+    }
+    var catalogItems by remember(existing?.id) { mutableStateOf(snapshot.foodCatalog) }
+    var query by rememberSaveable(existing?.id) { mutableStateOf("") }
+    var addingIngredients by rememberSaveable(existing?.id) { mutableStateOf(initialComponents.isEmpty()) }
+    var invalidComponents by rememberSaveable(existing?.id) { mutableStateOf(emptySet<String>()) }
+    var isSaving by remember(existing?.id) { mutableStateOf(false) }
+    var isDeleting by remember(existing?.id) { mutableStateOf(false) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var saveError by rememberSaveable(existing?.id) { mutableStateOf<String?>(null) }
+    val editingEnabled = !isSaving && !isDeleting
+
+    LaunchedEffect(snapshot.foodCatalog) {
+        val optimisticItems = catalogItems.filter { local -> snapshot.foodCatalog.none { it.id == local.id } }
+        catalogItems = (snapshot.foodCatalog + optimisticItems).distinctBy { it.id }
+    }
+
+    LaunchedEffect(name, type, manualCost, recurring, notes, day, components, pricingMode) {
+        if (existing == null) viewModel.updateBuilderDraft(
+            MealBuilderDraft(name, type, components, manualCost, recurring, day, notes, hasStarted = true),
+        )
+    }
+
+    val ingredientTotal = components.sumOf { it.estimatedCost }
+    val parsedManualPrice = manualCost.asDoubleOrNull()
+    val manualPriceValid = manualCost.isBlank() || (parsedManualPrice != null && parsedManualPrice.isFinite() && parsedManualPrice >= 0.0)
+    val effectivePrice = if (pricingMode == MealPriceMode.INGREDIENTS) ingredientTotal else (parsedManualPrice ?: 0.0)
+    val priceIncomplete = components.any { comp ->
+        comp.costPerUnit <= 0.0
+    }
+    val validName = name.isNotBlank()
+    val hasValidIngredients = components.all {
+        it.name.isNotBlank() && it.quantity.isFinite() && it.quantity > 0.0 && it.costPerUnit.isFinite() &&
+            it.costPerUnit >= 0.0 && it.estimatedCost.isFinite()
+    }
+    val canSave = validName && (pricingMode != MealPriceMode.MANUAL || manualPriceValid) && effectivePrice.isFinite() && effectivePrice >= 0.0 &&
+        hasValidIngredients && invalidComponents.isEmpty() && !isSaving && !isDeleting
+    val editing = existing != null
+    val hasUnsavedChanges = if (existing != null) {
+        name != existing.name || type != existing.mealType || recurring != existing.isRecurring || notes != existing.notes || day != existing.dayOfWeek ||
+            components != initialComponents || invalidComponents.isNotEmpty() || pricingMode != (if (existingHasManualTotal) MealPriceMode.MANUAL else MealPriceMode.INGREDIENTS) ||
+            (pricingMode == MealPriceMode.MANUAL && (parsedManualPrice ?: 0.0) != existing.cost)
     } else {
-        draft.components
-    }
-    val existingId = existing?.id
-    val newTemplateId = remember(existingId) { existingId ?: UUID.randomUUID().toString() }
-    var isSaving by remember(existingId) { mutableStateOf(false) }
-    var name by remember(existingId) { mutableStateOf(existing?.name ?: draft.name) }
-    var type by remember(existingId) { mutableStateOf(existing?.mealType ?: draft.mealType) }
-    var cost by remember(existingId) {
-        mutableStateOf(existing?.cost?.let { if (it == 0.0) "" else it.cleanNumber() } ?: draft.cost)
-    }
-    var recurring by remember(existingId) { mutableStateOf(existing?.isRecurring ?: draft.isRecurring) }
-    var notes by remember(existingId) { mutableStateOf(existing?.notes ?: draft.notes) }
-    var day by remember(existingId) { mutableStateOf(existing?.dayOfWeek ?: draft.dayOfWeek) }
-    var components by remember(existingId) { mutableStateOf(startingComponents) }
-    var componentCostInputs by remember(existingId) { mutableStateOf(mapOf<String, String>()) }
-    var catalogItems by remember(existingId) { mutableStateOf(snapshot.foodCatalog) }
-    var foodSearchQuery by remember { mutableStateOf("") }
-    var expandedComponentId by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(name, type, cost, recurring, notes, day, components) {
-        if (existing == null) {
-            viewModel.updateBuilderDraft(
-                MealBuilderDraft(
-                    name = name,
-                    mealType = type,
-                    components = components,
-                    cost = cost,
-                    isRecurring = recurring,
-                    dayOfWeek = day,
-                    notes = notes,
-                    hasStarted = true,
-                )
-            )
-        }
+        name.isNotBlank() || components.isNotEmpty() || invalidComponents.isNotEmpty() || manualCost.isNotBlank() || notes.isNotBlank() || type != MealType.LUNCH ||
+            !recurring || day != null || pricingMode != (if (newHasManualDraft) MealPriceMode.MANUAL else MealPriceMode.INGREDIENTS)
     }
 
-    val calculatedCost = components.sumOf { it.estimatedCost }
-    val hasCalculatedCost = components.any { it.costPerUnit > 0.0 }
-    val effectiveCost = if (components.isNotEmpty() && hasCalculatedCost) calculatedCost else cost.asDouble()
-    val valid = name.isNotBlank() && effectiveCost >= 0.0 && components.all { it.name.isNotBlank() && it.quantity > 0.0 }
-
-    fun updateComponent(component: MealComponent) {
-        components = components.map { if (it.id == component.id) component else it }
+    fun requestDismiss() {
+        if (isSaving || isDeleting) return
+        if (hasUnsavedChanges) showDiscardDialog = true else onDismiss()
     }
+
+    val latestRequestDismiss by rememberUpdatedState<() -> Unit>({ requestDismiss() })
+    val stableGuard = remember { { latestRequestDismiss() } }
+    val latestGuardChanged by rememberUpdatedState(onDismissGuardChanged)
+    DisposableEffect(Unit) {
+        onDispose { latestGuardChanged(null) }
+    }
+    SideEffect { onDismissGuardChanged(if (hasUnsavedChanges || isSaving || isDeleting) stableGuard else null) }
 
     fun addCatalogFood(food: FoodCatalogItem) {
-        val existingIndex = components.indexOfFirst { it.catalogId == food.id }
-        if (existingIndex >= 0) {
-            val old = components[existingIndex]
-            components = components.toMutableList().also {
-                it[existingIndex] = old.copy(quantity = old.quantity + 1.0)
-            }
+        val found = components.indexOfFirst { it.catalogId == food.id }
+        if (found >= 0) {
+            val old = components[found]
+            components = components.toMutableList().also { it[found] = old.copy(quantity = old.quantity + 1.0) }
         } else {
-            val newComp = when (val m = food.measurement) {
-                is FoodMeasurementType.SpoonsToGrams -> {
-                    val spoonsCost = BudgetMath.catalogCostPerPortion(snapshot, food).takeIf { it > 0.0 } ?: food.defaultCostPerPortion
-                    MealComponent(
-                        id = UUID.randomUUID().toString(),
-                        catalogId = food.id,
-                        name = food.name,
-                        quantity = 2.0,
-                        unit = m.spoonUnitName,
-                        costPerUnit = spoonsCost,
-                        useStock = true,
-                    )
-                }
+            val component = when (val measurement = food.measurement) {
+                is FoodMeasurementType.SpoonsToGrams -> MealComponent(
+                    catalogId = food.id, name = food.name, quantity = 2.0, unit = measurement.spoonUnitName,
+                    costPerUnit = BudgetMath.catalogCostPerPortion(snapshot, food).takeIf { it > 0.0 } ?: food.defaultCostPerPortion,
+                )
                 is FoodMeasurementType.TieredSizes -> {
-                    val defaultSize = m.sizes.getOrNull(1) ?: m.sizes.firstOrNull()
-                    val price = defaultSize?.price ?: food.defaultCostPerPortion
-                    val sizeName = defaultSize?.name ?: "Medium"
-                    MealComponent(
-                        id = UUID.randomUUID().toString(),
-                        catalogId = food.id,
-                        name = "${food.name} ($sizeName)",
-                        quantity = 1.0,
-                        unit = sizeName,
-                        costPerUnit = price,
-                        useStock = true,
-                    )
+                    val size = measurement.sizes.getOrNull(1) ?: measurement.sizes.firstOrNull()
+                    MealComponent(catalogId = food.id, name = food.name, quantity = 1.0, unit = size?.name ?: food.portionUnit,
+                        costPerUnit = size?.price ?: food.defaultCostPerPortion)
                 }
-                FoodMeasurementType.Standard -> {
-                    MealComponent(
-                        id = UUID.randomUUID().toString(),
-                        catalogId = food.id,
-                        name = food.name,
-                        quantity = 1.0,
-                        unit = food.portionUnit,
-                        costPerUnit = BudgetMath.catalogCostPerPortion(snapshot, food),
-                        useStock = true,
-                    )
-                }
+                FoodMeasurementType.Standard -> MealComponent(
+                    catalogId = food.id, name = food.name, quantity = 1.0, unit = food.portionUnit,
+                    costPerUnit = BudgetMath.catalogCostPerPortion(snapshot, food),
+                )
             }
-            components = components + newComp
+            components = components + component
         }
-        foodSearchQuery = ""
+        query = ""
     }
 
-    fun addCustomFood(rawName: String) {
-        val trimmed = rawName.trim()
-        if (trimmed.isBlank()) return
-        val catalogMatch = catalogItems.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
-        if (catalogMatch != null) {
-            addCatalogFood(catalogMatch)
-        } else {
-            val newComp = MealComponent(
-                id = UUID.randomUUID().toString(),
-                name = trimmed,
-                quantity = 1.0,
-                unit = "piece",
-                costPerUnit = 0.0,
-                useStock = false,
-            )
-            components = components + newComp
-            foodSearchQuery = ""
+    fun addCustomFood(raw: String) {
+        val foodName = raw.trim()
+        if (foodName.isBlank()) return
+        val match = catalogItems.firstOrNull { it.name.equals(foodName, true) }
+        if (match != null) addCatalogFood(match) else {
+            components = components + MealComponent(name = foodName, quantity = 1.0, unit = "piece", costPerUnit = 0.0, useStock = false)
+            query = ""
         }
     }
 
-    fun createCatalogAndAdd(rawName: String) {
-        val trimmed = rawName.trim()
-        if (trimmed.isBlank()) return
-        val food = FoodCatalogItem(
-            name = trimmed,
-            category = ItemCategory.FOOD_FRESH,
-            stockUnit = "piece",
-            portionUnit = "piece",
-            portionsPerStockUnit = 1.0,
+    fun createCatalogFood(raw: String) {
+        val foodName = raw.trim()
+        if (foodName.isBlank()) return
+        catalogItems.firstOrNull { it.name.equals(foodName, ignoreCase = true) }?.let { existingFood ->
+            addCatalogFood(existingFood)
+            return
+        }
+        val item = FoodCatalogItem(name = foodName, category = ItemCategory.FOOD_FRESH, stockUnit = "piece", portionUnit = "piece")
+        catalogItems = (catalogItems + item).distinctBy { it.name.lowercase() }
+        viewModel.saveFoodCatalogItem(item)
+        addCatalogFood(item)
+    }
+
+    fun saveMeal() {
+        if (!canSave) return
+        isSaving = true
+        saveError = null
+        val saved = MealTemplate(
+            id = newId, name = name.trim(), mealType = type, cost = effectivePrice,
+            isRecurring = recurring, dayOfWeek = day, notes = notes.trim(), isCustom = existing?.isCustom ?: true,
+            components = components,
         )
-        catalogItems = (catalogItems + food).distinctBy { it.name.lowercase() }
-        viewModel.saveFoodCatalogItem(food)
-        addCatalogFood(food)
-    }
-
-    fun updateQuantity(componentId: String, delta: Double) {
-        components = components.map { comp ->
-            if (comp.id == componentId) {
-                val newQ = (comp.quantity + delta).coerceAtLeast(0.1)
-                val rounded = kotlin.math.round(newQ * 10.0) / 10.0
-                comp.copy(quantity = rounded)
-            } else {
-                comp
-            }
+        viewModel.saveTemplate(saved) { success ->
+            isSaving = false
+            if (success) {
+                if (!editing) viewModel.clearBuilderDraft()
+                onDismiss()
+            } else saveError = "Couldn't save this meal. Your edits are still here; try again."
         }
     }
 
-    fun removeComponent(componentId: String) {
-        components = components.filterNot { it.id == componentId }
-        componentCostInputs = componentCostInputs - componentId
-        if (expandedComponentId == componentId) expandedComponentId = null
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .imePadding(),
-    ) {
-        // 1. PINNED TOP HEADER
+    Column(Modifier.fillMaxWidth().fillMaxHeight().navigationBarsPadding().imePadding()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier.fillMaxWidth().blockSheetDragWhenScrolled().testTag("meal_editor_header").padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    if (existing == null) "Build a meal" else "Edit meal",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = TextPrimary,
-                )
-                Text(
-                    "Live ingredient costing & meal recipe",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMuted,
-                )
+                Text(if (editing) "Edit meal" else "Build a meal", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
             }
-
-            Spacer(Modifier.width(4.dp))
-            IconButton(onClick = onDismiss) {
-                Icon(AppIcons.Close, contentDescription = "Close", tint = TextMuted)
+            IconButton(onClick = ::requestDismiss, enabled = !isSaving && !isDeleting) {
+                Icon(AppIcons.Close, contentDescription = "Close editor", tint = TextSecondary)
             }
         }
 
-        // 2. SCROLLABLE CONTENT BODY
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().weight(1f).testTag("meal_editor_scroll").sheetVerticalScroll(scrollState).padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-        // Meal Basics
-        FormSectionTitle("Meal details")
-        BudgetTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = "Meal name",
-            placeholder = "e.g. Scrambled Eggs & Toast, Lentil Soup",
-        )
-
-        Spacer(Modifier.height(10.dp))
-        Text("Meal type", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-        Spacer(Modifier.height(6.dp))
-
-        // 4-Card Meal Type Segmented Selector
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            MealType.entries.forEach { mealType ->
-                val isSelected = type == mealType
-                val color = when (mealType) {
-                    MealType.BREAKFAST -> AccentAmber
-                    MealType.LUNCH -> AccentMint
-                    MealType.DINNER -> AccentIndigo
-                    MealType.SNACK -> AccentPurple
-                }
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { type = mealType },
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isSelected) color.copy(alpha = 0.18f) else DarkSurfaceLow,
-                    border = BorderStroke(
-                        if (isSelected) 1.5.dp else 1.dp,
-                        if (isSelected) color else DarkBorder,
-                    ),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        MealIcon(mealType, Modifier.size(20.dp), tint = if (isSelected) color else TextSecondary)
-                        Text(
-                            mealType.label,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            ),
-                            color = if (isSelected) color else TextSecondary,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. Ingredients & Foods Section
-        Spacer(Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FormSectionTitle("Ingredients (${components.size})")
-                if (existing == null && components.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            components = emptyList()
-                            viewModel.clearBuilderDraft()
-                        },
-                        contentPadding = PaddingValues(0.dp),
-                    ) {
-                        Text("Clear all", style = MaterialTheme.typography.labelSmall, color = ErrorRed.copy(alpha = 0.8f))
-                    }
-                }
-            }
-            if (hasCalculatedCost) {
-                Text(
-                    "Total: ${BudgetMath.money(calculatedCost)}",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = AccentMintLight,
-                )
-            }
-        }
-
-        // Quick Add Search Bar
-        BudgetTextField(
-            value = foodSearchQuery,
-            onValueChange = { foodSearchQuery = it },
-            label = "Add ingredient",
-            placeholder = "Type name or search food catalog...",
-        )
-
-        // Matching catalog items or quick add suggestions
-        val filteredCatalog = if (foodSearchQuery.isNotBlank()) {
-            val q = foodSearchQuery.trim().lowercase()
-            catalogItems.filter { it.name.lowercase().contains(q) }
-        } else {
-            emptyList()
-        }
-
-        if (foodSearchQuery.isNotBlank()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                if (filteredCatalog.isNotEmpty()) {
-                    Text("From catalog:", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                    filteredCatalog.take(4).forEach { food ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { addCatalogFood(food) },
-                            shape = RoundedCornerShape(12.dp),
-                            color = DarkSurface,
-                            border = BorderStroke(1.dp, DarkBorder),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                val hasKnownFoodPrice = food.priceKnown && food.hasKnownPrice
-                                val costLabel = when (val m = food.measurement) {
-                                    is FoodMeasurementType.SpoonsToGrams -> {
-                                        val portionCost = BudgetMath.catalogCostPerPortion(snapshot, food)
-                                        if (!hasKnownFoodPrice || portionCost <= 0.0) {
-                                            "estimate incomplete"
-                                        } else {
-                                            "${BudgetMath.money(portionCost)}/${m.spoonUnitName} (~${m.gramsPerSpoon.cleanNumber()}g)"
-                                        }
-                                    }
-                                    is FoodMeasurementType.TieredSizes -> {
-                                        if (!hasKnownFoodPrice) {
-                                            "estimate incomplete"
-                                        } else {
-                                            m.sizes.joinToString(" Â· ") { "${it.name} ${it.price.cleanNumber()} EGP" }
-                                        }
-                                    }
-                                    FoodMeasurementType.Standard -> {
-                                        val portionCost = BudgetMath.catalogCostPerPortion(snapshot, food)
-                                        if (!hasKnownFoodPrice || portionCost <= 0.0) {
-                                            "estimate incomplete"
-                                        } else {
-                                            "${BudgetMath.money(portionCost)}/${food.portionUnit}"
-                                        }
-                                    }
-                                }
-                                Text(
-                                    costLabel,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (costLabel == "estimate incomplete") AccentAmber else AccentMintLight,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Add", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = AccentMint)
-                            }
-                        }
-                    }
-                }
-
-                // If not an exact match, allow adding as custom or catalog
-                val hasExact = catalogItems.any { it.name.equals(foodSearchQuery.trim(), ignoreCase = true) }
-                if (!hasExact) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = { addCustomFood(foodSearchQuery) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, DarkBorder),
-                        ) {
-                            Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Add as custom", style = MaterialTheme.typography.labelSmall)
-                        }
-                        Button(
-                            onClick = { createCatalogAndAdd(foodSearchQuery) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentMint.copy(alpha = 0.18f), contentColor = AccentMintLight),
-                        ) {
-                            Icon(AppIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Save to catalog", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-            }
-        } else if (catalogItems.isNotEmpty()) {
-            // Horizontal scroll of popular catalog items
-            Spacer(Modifier.height(4.dp))
-            Text("Quick add from catalog:", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                catalogItems.take(16).forEach { food ->
-                    TagChip(
-                        text = "+ ${food.name}",
-                        selected = components.any { it.catalogId == food.id },
-                        onClick = { addCatalogFood(food) },
-                    )
-                }
-            }
-        }
-
-        // Ingredients List
-        Spacer(Modifier.height(8.dp))
-        if (components.isEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = DarkSurfaceLow),
-                border = BorderStroke(1.dp, DarkBorder),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        "No ingredients added yet",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = TextPrimary,
-                    )
-                    Text(
-                        "Pick foods from catalog above to track stock and calculate cost, or set a manual price below.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextMuted,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                }
-            }
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                components.forEach { component ->
-                    val isExpanded = expandedComponentId == component.id
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = DarkSurfaceLow),
-                        border = BorderStroke(1.dp, if (isExpanded) AccentMint.copy(alpha = 0.4f) else DarkBorder),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            val catalog = catalogItems.firstOrNull { it.id == component.catalogId }
-                            val measurement = catalog?.measurement ?: FoodMeasurementCodec.decodeMeasurement(
-                                rawNotes = "",
-                                name = component.name,
-                                portionUnit = component.unit,
-                            )
-                            val displayName = if (measurement is FoodMeasurementType.TieredSizes) {
-                                catalog?.name ?: component.name.substringBefore(" (")
-                            } else {
-                                component.name
-                            }
-
-                            // Header Row: Left (Name & Subtitle) + Right (Stepper & Delete)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Text(
-                                            displayName,
-                                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                                            color = TextPrimary,
-                                        )
-                                        if (component.catalogId != null) {
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = AccentMint.copy(alpha = 0.12f),
-                                            ) {
-                                                Text(
-                                                    "STOCK",
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        fontSize = 12.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                    ),
-                                                    color = AccentMintLight,
-                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                                )
-                                            }
-                                        }
-
-                                        // Total amount next to individual ingredient!
-                                        if (component.estimatedCost > 0.0) {
-                                            Surface(
-                                                shape = RoundedCornerShape(6.dp),
-                                                color = AccentMint.copy(alpha = 0.15f),
-                                            ) {
-                                                Text(
-                                                    BudgetMath.money(component.estimatedCost),
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 12.sp,
-                                                    ),
-                                                    color = AccentMintLight,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    val isUnknownPrice = component.costPerUnit <= 0.0 || (catalog != null && (!catalog.priceKnown || !catalog.hasKnownPrice))
-                                    when (measurement) {
-                                        is FoodMeasurementType.SpoonsToGrams -> {
-                                            val totalGrams = component.quantity * measurement.gramsPerSpoon
-                                            val unitLabel = if (component.quantity == 1.0) measurement.spoonUnitName else "${measurement.spoonUnitName}s"
-                                            Text(
-                                                if (isUnknownPrice) {
-                                                    "${component.quantity.cleanNumber()} $unitLabel (~${totalGrams.cleanNumber()}g) Â· estimate incomplete"
-                                                } else {
-                                                    "${component.quantity.cleanNumber()} $unitLabel (~${totalGrams.cleanNumber()}g) Â· ${BudgetMath.money(component.costPerUnit)}/${measurement.spoonUnitName}"
-                                                },
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (isUnknownPrice) AccentAmber else TextSecondary,
-                                            )
-                                        }
-                                        is FoodMeasurementType.TieredSizes -> {
-                                            Text(
-                                                if (isUnknownPrice) {
-                                                    if (component.costPerUnit <= 0.0) "Select size below" else "${component.quantity.cleanNumber()} Ã— ${component.unit} Â· estimate incomplete"
-                                                } else {
-                                                    "${component.quantity.cleanNumber()} Ã— ${component.unit} (${BudgetMath.money(component.costPerUnit)} each)"
-                                                },
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (isUnknownPrice && component.costPerUnit > 0.0) AccentAmber else TextSecondary,
-                                            )
-                                        }
-                                        FoodMeasurementType.Standard -> {
-                                            Text(
-                                                if (isUnknownPrice) {
-                                                    "${component.quantity.cleanNumber()} ${component.unit} Â· estimate incomplete"
-                                                } else {
-                                                    "${component.quantity.cleanNumber()} ${component.unit} Â· ${BudgetMath.money(component.costPerUnit)}/${component.unit}"
-                                                },
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (isUnknownPrice) AccentAmber else TextSecondary,
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(Modifier.width(8.dp))
-
-                                // Stepper controls
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Surface(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable { updateQuantity(component.id, -1.0) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = DarkSurfaceHigh,
-                                        border = BorderStroke(1.dp, DarkBorder),
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(AppIcons.Remove, contentDescription = "Decrease quantity", tint = TextPrimary, modifier = Modifier.size(20.dp))
-                                        }
-                                    }
-
-                                    val stepperText = when (measurement) {
-                                        is FoodMeasurementType.SpoonsToGrams -> {
-                                            val u = if (component.quantity == 1.0) measurement.spoonUnitName else "${measurement.spoonUnitName}s"
-                                            "${component.quantity.cleanNumber()} $u"
-                                        }
-                                        is FoodMeasurementType.TieredSizes -> {
-                                            val u = if (component.quantity == 1.0) "pack" else "packs"
-                                            "${component.quantity.cleanNumber()} $u"
-                                        }
-                                        FoodMeasurementType.Standard -> {
-                                            "${component.quantity.cleanNumber()} ${component.unit}"
-                                        }
-                                    }
-
-                                    Surface(
-                                        modifier = Modifier
-                                            .widthIn(min = 46.dp)
-                                            .height(32.dp),
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = DarkSurface,
-                                        border = BorderStroke(1.dp, DarkBorder),
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 6.dp)) {
-                                            Text(
-                                                stepperText,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                                color = TextPrimary,
-                                                maxLines = 1,
-                                            )
-                                        }
-                                    }
-
-                                    Surface(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable { updateQuantity(component.id, 1.0) },
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = DarkSurfaceHigh,
-                                        border = BorderStroke(1.dp, DarkBorder),
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(AppIcons.Add, contentDescription = "Increase quantity", tint = TextPrimary, modifier = Modifier.size(20.dp))
-                                        }
-                                    }
-
-                                    IconButton(
-                                        onClick = { removeComponent(component.id) },
-                                        modifier = Modifier.size(32.dp),
-                                    ) {
-                                        Icon(
-                                            AppIcons.Delete,
-                                            contentDescription = "Remove",
-                                            tint = ErrorRed.copy(alpha = 0.8f),
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Full-width Tiered Size Selector (if applicable)
-                            if (measurement is FoodMeasurementType.TieredSizes) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    measurement.sizes.forEach { size ->
-                                        val isSelected = component.unit.equals(size.name, ignoreCase = true) ||
-                                            component.name.contains("(${size.name})", ignoreCase = true) ||
-                                            (component.unit.isBlank() && component.costPerUnit == size.price)
-                                        Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = if (isSelected) AccentMint.copy(alpha = 0.2f) else DarkSurfaceHigh,
-                                            border = BorderStroke(
-                                                if (isSelected) 1.5.dp else 1.dp,
-                                                if (isSelected) AccentMint else DarkBorder,
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable {
-                                                    val baseName = catalog?.name ?: component.name.substringBefore(" (")
-                                                    componentCostInputs = componentCostInputs + (component.id to (if (size.price == 0.0) "" else size.price.cleanNumber()))
-                                                    updateComponent(
-                                                        component.copy(
-                                                            name = "$baseName (${size.name})",
-                                                            unit = size.name,
-                                                            costPerUnit = size.price,
-                                                        ),
-                                                    )
-                                                },
-                                        ) {
-                                            Box(
-                                                contentAlignment = Alignment.Center,
-                                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-                                            ) {
-                                                Text(
-                                                    "${size.name} Â· ${size.price.cleanNumber()} EGP",
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    ),
-                                                    color = if (isSelected) AccentMintLight else TextSecondary,
-                                                    maxLines = 1,
-                                                    textAlign = TextAlign.Center,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Details toggle row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        expandedComponentId = if (isExpanded) null else component.id
-                                    },
-                                    contentPadding = PaddingValues(0.dp),
-                                ) {
-                                    Text(
-                                        if (isExpanded) "Hide price details â–²" else "Edit price & unit â–¼",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary,
-                                    )
-                                }
-
-                                if (component.catalogId != null) {
-                                    val catalogItem = catalogItems.firstOrNull { it.id == component.catalogId }
-                                    if (catalogItem != null) {
-                                        val available = BudgetMath.catalogAvailablePortions(snapshot, catalogItem)
-                                        Text(
-                                            "${available.cleanNumber()} ${catalogItem.portionUnit} in stock",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (available >= component.quantity) AccentMintLight else AccentAmber,
-                                        )
-                                    }
-                                }
-                            }
-
-                            if (isExpanded) {
-                                val costInputValue = componentCostInputs[component.id]
-                                    ?: if (component.costPerUnit == 0.0) "" else component.costPerUnit.cleanNumber()
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    NumberField(
-                                        value = costInputValue,
-                                        onValueChange = { raw ->
-                                            componentCostInputs = componentCostInputs + (component.id to raw)
-                                            updateComponent(component.copy(costPerUnit = raw.asDouble().coerceAtLeast(0.0)))
-                                        },
-                                        label = "Cost/${component.unit}",
-                                        placeholder = "0",
-                                        prefix = "EGP ",
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    BudgetTextField(
-                                        value = component.unit,
-                                        onValueChange = { updateComponent(component.copy(unit = it.trim())) },
-                                        label = "Unit",
-                                        modifier = Modifier.weight(1f),
-                                        enabled = component.catalogId == null,
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(
-                                        checked = component.useStock,
-                                        onCheckedChange = { updateComponent(component.copy(useStock = it)) },
-                                        colors = sheetCheckboxColors(),
-                                    )
-                                    Text(
-                                        "Reduce linked stock when eaten",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextPrimary,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Meal Price (Manual override when no ingredient costs exist)
-        Spacer(Modifier.height(10.dp))
-        if (!hasCalculatedCost) {
-            FormSectionTitle("Meal price")
-            NumberField(
-                value = cost,
-                onValueChange = { cost = it },
-                label = "Total price",
-                placeholder = "0",
-                prefix = "EGP ",
-            )
-        }
-
-        // 5. Schedule & Planning Card
-        Spacer(Modifier.height(12.dp))
-        FormSectionTitle("Planning & Schedule")
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurfaceLow),
-            border = BorderStroke(1.dp, DarkBorder),
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = recurring,
-                        onCheckedChange = { recurring = it },
-                        colors = sheetCheckboxColors(),
-                    )
-                    Column(Modifier.weight(1f)) {
-                        Text("Include in auto-fill weekly plans", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = TextPrimary)
-                        Text("The planner will pick this meal when generating plans", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                    }
-                }
-
-                Text("Fixed day of the week (optional)", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    FilterChip(
-                        selected = day == null,
-                        onClick = { day = null },
-                        label = { Text("Any day") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AccentMint.copy(alpha = 0.16f),
-                            selectedLabelColor = AccentMintLight,
-                        ),
-                    )
-                    DayOfWeek.entries.forEach { d ->
-                        val isSelected = day == d
+            EditorCard(title = "Meal details") {
+                BudgetTextField(name, { name = it }, "Meal name", modifier = Modifier.testTag("meal_name"), placeholder = "e.g. Lentil soup with bread", enabled = editingEnabled)
+                if (name.isBlank()) Text("Enter a name to save this meal.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Text("Meal type", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    MealType.entries.forEach { mealType ->
                         FilterChip(
-                            selected = isSelected,
-                            onClick = { day = if (isSelected) null else d },
-                            label = { Text(d.name.take(3).lowercase().replaceFirstChar { it.uppercase() }) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = AccentMint.copy(alpha = 0.16f),
-                                selectedLabelColor = AccentMintLight,
-                            ),
+                            selected = type == mealType, onClick = { type = mealType }, enabled = editingEnabled,
+                            label = { Text(mealType.label) },
+                            leadingIcon = if (type == mealType) ({ Icon(AppIcons.Check, null, Modifier.size(16.dp)) }) else null,
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentMint.copy(alpha = .16f), selectedLabelColor = AccentMintLight),
                         )
                     }
                 }
-
-                BudgetTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = "Recipe or notes (optional)",
-                    placeholder = "Instructions, sides, or reminders...",
-                    singleLine = false,
-                )
             }
-        }
 
-            if (existing != null) {
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = {
-                        viewModel.deleteTemplate(existing)
-                        onDismiss()
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, ErrorBorder),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-                ) {
-                    Icon(AppIcons.Delete, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Delete shortcut", color = ErrorRed, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-        }
-
-        // 3. PINNED BOTTOM ACTION BAR
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = DarkSurface,
-            border = BorderStroke(1.dp, DarkBorder),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column {
-                    Text(
-                        "TOTAL",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
-                        ),
-                        color = TextMuted,
-                    )
-                    val isEstimateIncomplete = components.isNotEmpty() && components.any { comp ->
-                        val cat = catalogItems.firstOrNull { it.id == comp.catalogId }
-                        comp.costPerUnit <= 0.0 || (cat != null && (!cat.priceKnown || !cat.hasKnownPrice))
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Ingredients (${components.size})", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+                    TextButton(onClick = {
+                        if (addingIngredients) { query = ""; focusManager.clearFocus() }
+                        addingIngredients = !addingIngredients
+                    }, enabled = editingEnabled, modifier = Modifier.heightIn(min = 48.dp).testTag("toggle_add_ingredients")) {
+                        Icon(if (addingIngredients) AppIcons.Close else AppIcons.Add, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (addingIngredients) "Done" else "Add")
                     }
-                    Text(
-                        if (isEstimateIncomplete) "estimate incomplete" else BudgetMath.money(effectiveCost),
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = if (isEstimateIncomplete) 16.sp else 20.sp,
-                        ),
-                        color = if (isEstimateIncomplete) AccentAmber else AccentMintLight,
+                }
+                if (addingIngredients) {
+                    BudgetTextField(
+                        query, { query = it }, "Find an ingredient", modifier = Modifier.testTag("catalog_search"), placeholder = "Search by food name", enabled = editingEnabled,
+                        trailingIcon = if (query.isNotEmpty()) ({ IconButton(onClick = { query = "" }, enabled = editingEnabled) { Icon(AppIcons.Close, "Clear search") } }) else null,
                     )
+                    val matches = if (query.isBlank()) emptyList() else catalogItems.filter { it.name.contains(query.trim(), ignoreCase = true) }.take(6)
+                    if (query.isNotBlank()) {
+                        if (matches.isEmpty()) {
+                            Text("No catalog matches. Add \"${query.trim()}\" as a custom ingredient or save it to your catalog.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        } else {
+                            Text("Catalog matches", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                            matches.forEach { food ->
+                                CatalogSearchResult(food, snapshot, enabled = editingEnabled, onClick = { addCatalogFood(food) })
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { addCustomFood(query) }, enabled = editingEnabled, modifier = Modifier.weight(1f)) { Text("Add custom") }
+                            Button(onClick = { createCatalogFood(query) }, enabled = editingEnabled, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = AccentMint, contentColor = MaterialTheme.colorScheme.onPrimary)) { Text("Save to catalog") }
+                        }
+                    } else if (catalogItems.isNotEmpty()) {
+                        val quickPicks = catalogItems.filter { food -> components.none { it.catalogId == food.id } }.take(10)
+                        if (quickPicks.isNotEmpty()) {
+                            Text("Quick picks", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                quickPicks.forEach { food ->
+                                    AssistChip(onClick = { addCatalogFood(food) }, enabled = editingEnabled, label = { Text(food.name) }, leadingIcon = { Icon(AppIcons.Add, null, Modifier.size(16.dp)) })
+                                }
+                            }
+                        }
+                    } else {
+                        EmptyStateCard("Your food catalog is empty", "Type an ingredient above to add it to this meal or save it to the catalog.")
+                    }
+                    if (components.isNotEmpty()) TextButton(
+                        onClick = { components = emptyList(); invalidComponents = emptySet() },
+                        enabled = editingEnabled, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.align(Alignment.End),
+                    ) { Text("Clear ingredients") }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (existing == null && (components.isNotEmpty() || name.isNotBlank())) {
-                        TextButton(
-                            onClick = {
-                                name = ""
-                                cost = ""
-                                components = emptyList()
-                                notes = ""
-                                viewModel.clearBuilderDraft()
-                            },
-                        ) {
-                            Text("Reset", color = ErrorRed, style = MaterialTheme.typography.labelMedium)
+                if (components.isEmpty()) {
+                    EmptyStateCard("No ingredients yet", "Add ingredients to track portions, stock, and a recipe total.")
+                } else {
+                    components.forEach { component ->
+                        key(component.id) {
+                            val food = catalogItems.firstOrNull { it.id == component.catalogId }
+                            MealIngredientCard(
+                                component = component,
+                                catalog = food,
+                                availablePortions = food?.let { snapshot.catalogAvailablePortions[it.id] },
+                                onChange = { changed -> components = components.map { if (it.id == changed.id) changed else it } },
+                                onRemove = {
+                                    components = components.filterNot { it.id == component.id }
+                                    invalidComponents = invalidComponents - component.id
+                                },
+                                onInputValidityChanged = { isValid ->
+                                    invalidComponents = if (isValid) invalidComponents - component.id else invalidComponents + component.id
+                                },
+                                enabled = editingEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
                     }
+                    if (invalidComponents.isNotEmpty()) Text("Finish or correct the highlighted ingredient fields before saving.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
 
-                    Button(
-                        onClick = {
-                            if (isSaving) return@Button
-                            isSaving = true
-                            viewModel.saveTemplate(
-                                MealTemplate(
-                                    id = newTemplateId,
-                                    name = name.trim(),
-                                    mealType = type,
-                                    cost = effectiveCost,
-                                    isRecurring = recurring,
-                                    dayOfWeek = day,
-                                    notes = notes.trim(),
-                                    isCustom = existing != null,
-                                    components = components,
-                                ),
-                            )
-                            if (existing == null) {
-                                viewModel.clearBuilderDraft()
-                            }
-                            onDismiss()
-                        },
-                        enabled = valid && !isSaving,
+            EditorCard(title = "Price") {
+                PriceModeOption(
+                    selected = pricingMode == MealPriceMode.INGREDIENTS,
+                    title = "Ingredient total",
+                    detail = "${BudgetMath.money(ingredientTotal)} from the recipe",
+                    onClick = { pricingMode = MealPriceMode.INGREDIENTS },
+                    enabled = editingEnabled,
+                    modifier = Modifier.testTag("price_mode_ingredients"),
+                )
+                PriceModeOption(
+                    selected = pricingMode == MealPriceMode.MANUAL,
+                    title = "Manual total",
+                    detail = "Set the full price for this meal",
+                    onClick = { pricingMode = MealPriceMode.MANUAL },
+                    enabled = editingEnabled,
+                    modifier = Modifier.testTag("price_mode_manual"),
+                )
+                if (pricingMode == MealPriceMode.MANUAL) {
+                    OutlinedTextField(
+                        value = manualCost,
+                        onValueChange = { manualCost = it },
+                        modifier = Modifier.fillMaxWidth().testTag("manual_price"),
+                        enabled = editingEnabled,
+                        label = { Text("Manual meal total") },
+                        placeholder = { Text("0") },
+                        prefix = { Text("EGP ") },
+                        singleLine = true,
+                        isError = !manualPriceValid,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        supportingText = if (!manualPriceValid) ({ Text("Enter a finite price of zero or more.") }) else null,
                         shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AccentMint,
-                            contentColor = Color.Black,
-                            disabledContainerColor = DarkSurfaceHigh,
-                            disabledContentColor = TextMuted,
-                        ),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Icon(AppIcons.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Save meal", fontWeight = FontWeight.Bold)
+                        colors = budgetTextFieldColors(),
+                    )
+                    if (manualCost.isBlank()) Text("No manual price entered; this meal will save as EGP 0.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                }
+                if (priceIncomplete) Text(if (pricingMode == MealPriceMode.MANUAL) "Some ingredient prices are missing. This meal uses your manual total." else "Some ingredient prices are missing. Add missing costs or choose a manual total.", style = MaterialTheme.typography.bodySmall, color = AccentAmber)
+            }
+
+            EditorCard(title = "Planning") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = recurring, onCheckedChange = { recurring = it }, enabled = editingEnabled, colors = sheetCheckboxColors())
+                    Text("Use in weekly auto-fill", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = TextPrimary)
+                }
+                Text("Preferred day", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    FilterChip(selected = day == null, onClick = { day = null }, enabled = editingEnabled, label = { Text("Any day") })
+                    DayOfWeek.entries.forEach { d ->
+                        FilterChip(selected = day == d, onClick = { day = if (day == d) null else d }, enabled = editingEnabled, label = { Text(d.name.lowercase().replaceFirstChar { it.uppercase() }) })
                     }
                 }
+                BudgetTextField(notes, { notes = it }, "Recipe or notes (optional)", placeholder = "Instructions, sides, reminders...", singleLine = false, enabled = editingEnabled)
+            }
+
+            if (editing) {
+                OutlinedButton(onClick = { showDeleteDialog = true }, enabled = !isSaving && !isDeleting, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("delete_meal"), border = BorderStroke(1.dp, ErrorRed.copy(alpha = .45f)), colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed)) {
+                    Icon(AppIcons.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Delete meal")
+                }
+            } else if (hasUnsavedChanges) {
+                TextButton(onClick = {
+                    name = ""; type = MealType.LUNCH; manualCost = ""; recurring = true; notes = ""; day = null
+                    components = emptyList(); invalidComponents = emptySet(); pricingMode = MealPriceMode.INGREDIENTS; query = ""; addingIngredients = true
+                    viewModel.clearBuilderDraft()
+                }, enabled = editingEnabled, modifier = Modifier.align(Alignment.End)) { Text("Reset meal", color = ErrorRed) }
+            }
+            saveError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            Spacer(Modifier.height(6.dp))
+        }
+
+        Surface(color = DarkSurface, border = BorderStroke(1.dp, DarkBorder), modifier = Modifier.fillMaxWidth().blockSheetDragWhenScrolled().testTag("meal_editor_footer")) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val compactFooter = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.2f
+                val totalBlock: @Composable () -> Unit = {
+                    Column {
+                        Text(if (pricingMode == MealPriceMode.INGREDIENTS) "INGREDIENT TOTAL" else "MANUAL TOTAL", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp), color = TextMuted)
+                        Text(BudgetMath.money(effectivePrice), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = AccentMintLight)
+                        if (priceIncomplete) Text("Includes unpriced ingredients", style = MaterialTheme.typography.labelSmall, color = AccentAmber)
+                    }
+                }
+                val saveButton: @Composable (Modifier) -> Unit = { buttonModifier ->
+                    Button(
+                        onClick = { saveMeal() },
+                        enabled = canSave,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentMint, contentColor = MaterialTheme.colorScheme.onPrimary, disabledContainerColor = DarkSurfaceHigh, disabledContentColor = TextMuted),
+                        modifier = buttonModifier.heightIn(min = 50.dp).testTag("save_meal"),
+                    ) {
+                        if (isSaving) Text("Saving...", fontWeight = FontWeight.Bold) else {
+                            Icon(AppIcons.Check, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Save meal", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                if (compactFooter) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            totalBlock()
+                            if (saveError != null) TextButton(onClick = { requestDismiss() }, enabled = editingEnabled) { Text("Cancel") }
+                        }
+                        saveButton(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.weight(1f)) { totalBlock() }
+                        if (saveError != null) TextButton(onClick = { requestDismiss() }, enabled = editingEnabled) { Text("Cancel") }
+                        saveButton(Modifier)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDiscardDialog) AlertDialog(
+        onDismissRequest = { showDiscardDialog = false },
+        title = { Text("Discard unsaved changes?") },
+        text = { Text("Your changes to this meal will be lost.") },
+        confirmButton = { TextButton(onClick = { showDiscardDialog = false; if (!editing) viewModel.clearBuilderDraft(); onDismiss() }) { Text("Discard", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = { showDiscardDialog = false }) { Text("Keep editing") } },
+    )
+    if (showDeleteDialog && existing != null) AlertDialog(
+        onDismissRequest = { if (!isDeleting) showDeleteDialog = false },
+        title = { Text("Delete ${existing.name}?") },
+        text = { Text("This meal shortcut will be removed. This can't be undone.") },
+        confirmButton = {
+            TextButton(enabled = !isDeleting, modifier = Modifier.testTag("confirm_delete"), onClick = {
+                isDeleting = true; saveError = null
+                viewModel.deleteTemplate(existing) { success ->
+                    isDeleting = false
+                    if (success) onDismiss() else { showDeleteDialog = false; saveError = "Couldn't delete this meal. Please try again." }
+                }
+            }) { Text(if (isDeleting) "Deleting..." else "Delete", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(enabled = !isDeleting, modifier = Modifier.testTag("cancel_delete"), onClick = { showDeleteDialog = false }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun EditorCard(title: String, subtitle: String? = null, content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurfaceLow),
+        border = BorderStroke(1.dp, DarkBorder.copy(alpha = .75f)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (subtitle != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                }
+            } else {
+                Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = TextPrimary)
+            }
+            content()
+        }
+    }
+}
+
+@Composable
+private fun EmptyStateCard(title: String, description: String) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = DarkSurface, border = BorderStroke(1.dp, DarkBorder)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = TextPrimary)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        }
+    }
+}
+
+@Composable
+private fun CatalogSearchResult(food: FoodCatalogItem, snapshot: com.budgetmeals.app.data.AppSnapshot, enabled: Boolean, onClick: () -> Unit) {
+    val cost = BudgetMath.catalogCostPerPortion(snapshot, food)
+    val secondary = when {
+        !food.priceKnown || !food.hasKnownPrice || cost <= 0.0 -> "Price not set"
+        else -> "${BudgetMath.money(cost)} / ${food.portionUnit}"
+    }
+    Surface(
+        Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).testTag("catalog_result_${food.id}"), shape = RoundedCornerShape(15.dp),
+        color = DarkSurface, border = BorderStroke(1.dp, DarkBorder),
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(food.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = TextPrimary)
+                Text(secondary, style = MaterialTheme.typography.bodySmall, color = if (secondary == "Price not set") AccentAmber else AccentMintLight)
+            }
+            Icon(AppIcons.Add, "Add ${food.name}", tint = AccentMint)
+        }
+    }
+}
+
+@Composable
+private fun PriceModeOption(selected: Boolean, title: String, detail: String, onClick: () -> Unit, enabled: Boolean, modifier: Modifier = Modifier) {
+    Surface(
+        modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick), shape = RoundedCornerShape(16.dp),
+        color = if (selected) AccentMint.copy(alpha = .10f) else DarkSurface,
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) AccentMint.copy(alpha = .7f) else DarkBorder),
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = selected, onClick = onClick, enabled = enabled)
+            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = TextPrimary)
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
             }
         }
     }

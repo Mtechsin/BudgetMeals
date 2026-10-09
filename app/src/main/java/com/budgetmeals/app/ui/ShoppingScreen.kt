@@ -65,7 +65,6 @@ fun ShoppingScreen(
         item {
             ScreenHeader(
                 title = "Shopping",
-                subtitle = "The list updates itself from your buying habit",
             )
         }
 
@@ -115,7 +114,7 @@ fun ShoppingScreen(
                         } else {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    "${open.size} ${if (open.size == 1) "item" else "items"} Â· ",
+                                    "${open.size} ${if (open.size == 1) "item" else "items"} Ã‚Â· ",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = TextSecondary,
                                 )
@@ -225,7 +224,7 @@ private fun ShoppingRow(
                             color = if (item.isChecked) TextMuted else TextSecondary,
                         )
                         Text(
-                            "Â·",
+                            "Ã‚Â·",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary,
                         )

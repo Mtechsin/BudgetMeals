@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+﻿@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package com.budgetmeals.app.ui
 
@@ -92,7 +92,7 @@ fun FoodCatalogScreen(
             ScreenHeader(
                 title = "Food items",
                 subtitle = if (filteredItems.size == snapshot.foodCatalog.size) {
-                    "${snapshot.foodCatalog.size} items for meal building & stock"
+                    "${snapshot.foodCatalog.size} items"
                 } else {
                     "${filteredItems.size} of ${snapshot.foodCatalog.size} items"
                 },
@@ -523,7 +523,7 @@ private fun FoodCatalogItemCard(
                 }
             } else if (item.priceOptions.isNotEmpty()) {
                 Text(
-                    text = "Sizes: " + item.priceOptions.joinToString(" · ") { "${it.name} ${BudgetMath.money(it.price)}" },
+                    text = "Sizes: " + item.priceOptions.joinToString(" Â· ") { "${it.name} ${BudgetMath.money(it.price)}" },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),

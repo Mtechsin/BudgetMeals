@@ -125,7 +125,7 @@ internal fun CategoryFormSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit
     val icons = listOf("receipt", "transport", "health", "personal", "other")
     var icon by remember { mutableStateOf(icons.first()) }
     val valid = name.isNotBlank() && budget.asDouble() >= 0.0
-    SheetBody("Add a category", "Use this for anything outside food.", onDismiss) {
+    SheetBody("Add a category", null, onDismiss) {
         FormSectionTitle("Category details")
         BudgetTextField(name, { name = it }, label = "Category name")
         NumberField(budget, { budget = it }, "Monthly budget", Modifier.padding(top = 12.dp), prefix = "EGP ")

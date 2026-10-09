@@ -43,7 +43,16 @@ android {
                 "proguard-rules.pro",
             )
         }
+        create("uiTest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".uitest"
+            versionNameSuffix = "-ui-test"
+            matchingFallbacks += "debug"
+        }
     }
+
+    // Device tests use their own application and storage, separate from the user's installed app.
+    testBuildType = "uiTest"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -103,7 +112,7 @@ val verifyDevelopmentSigningKey = tasks.register("verifyDevelopmentSigningKey") 
 }
 
 tasks.matching {
-    it.name in setOf("validateSigningDebug", "validateSigningDebugAndroidTest", "validateSigningRelease")
+    it.name in setOf("validateSigningDebug", "validateSigningUiTest", "validateSigningUiTestAndroidTest", "validateSigningRelease")
 }.configureEach {
     dependsOn(verifyDevelopmentSigningKey)
 }
@@ -127,5 +136,9 @@ dependencies {
     testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test:runner:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2025.02.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    add("uiTestImplementation", "androidx.compose.ui:ui-test-manifest")
 }

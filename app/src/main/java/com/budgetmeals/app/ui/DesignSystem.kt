@@ -157,9 +157,9 @@ fun IconBadge(
 private fun QuickAddRow(
     icon: ImageVector,
     title: String,
-    subtitle: String,
     tint: Color,
     onClick: () -> Unit,
+    subtitle: String? = null,
 ) {
     SoftCard(onClick = onClick, contentPadding = Spacing.md) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -167,7 +167,9 @@ private fun QuickAddRow(
             Spacer(Modifier.width(Spacing.md))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (subtitle != null) {
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Icon(AppIcons.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
         }
@@ -199,28 +201,24 @@ fun QuickAddSheetContent(
         QuickAddRow(
             icon = AppIcons.ShoppingBasket,
             title = "I bought food",
-            subtitle = "Adds to stock and spending",
             tint = MaterialTheme.colorScheme.primary,
             onClick = onPurchase,
         )
         QuickAddRow(
             icon = AppIcons.ReceiptLong,
             title = "I spent on something else",
-            subtitle = "Internet, calling, household, custom",
             tint = MaterialTheme.colorScheme.tertiary,
             onClick = onExpense,
         )
         QuickAddRow(
             icon = AppIcons.ShoppingCart,
             title = "Remind me to buy",
-            subtitle = "Add to the shopping list",
             tint = MaterialTheme.colorScheme.secondary,
             onClick = onShoppingItem,
         )
         QuickAddRow(
             icon = AppIcons.Restaurant,
             title = "Create a meal",
-            subtitle = "Build a reusable meal from foods",
             tint = AccentPurple,
             onClick = onMeal,
         )

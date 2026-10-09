@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,14 +40,15 @@ private fun SheetHeader(title: String, subtitle: String? = null, onClose: () -> 
 @Composable
 internal fun SheetBody(
     title: String,
-    subtitle: String,
+    subtitle: String? = null,
     onClose: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .sheetVerticalScroll(scrollState)
             .navigationBarsPadding()
             .imePadding()
             .padding(horizontal = 20.dp, vertical = 4.dp),
