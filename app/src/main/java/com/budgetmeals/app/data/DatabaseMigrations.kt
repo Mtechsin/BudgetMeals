@@ -179,6 +179,18 @@ internal object DatabaseMigrations {
         if (oldVersion < 14) {
             repairShippedRecipeUnits(db)
         }
+        if (oldVersion < 15) {
+            db.execSQL("ALTER TABLE expenses ADD COLUMN food_classification TEXT")
+            db.execSQL("ALTER TABLE meal_logs ADD COLUMN cash_paid REAL")
+            db.execSQL("UPDATE expenses SET food_classification = 'groceries' WHERE id LIKE 'stock-%'")
+            db.execSQL("UPDATE expenses SET food_classification = 'meal' WHERE id LIKE 'meal-log:%'")
+        }
+        if (oldVersion < 16) {
+            db.execSQL("ALTER TABLE meal_templates ADD COLUMN meal_marker TEXT NOT NULL DEFAULT 'UNMARKED'")
+            db.execSQL("ALTER TABLE meal_logs ADD COLUMN meal_marker TEXT NOT NULL DEFAULT 'UNMARKED'")
+            db.execSQL("ALTER TABLE day_plans ADD COLUMN meal_marker TEXT NOT NULL DEFAULT 'UNMARKED'")
+            db.execSQL("ALTER TABLE expenses ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     private fun repairShippedRecipeUnits(db: SQLiteDatabase) {
@@ -587,6 +599,7 @@ internal object DatabaseMigrations {
                 }
             }
         }
+
     }
 
     private fun remapCatalogReferences(db: SQLiteDatabase, oldId: String, newId: String) {

@@ -374,7 +374,15 @@ internal fun MealIngredientCard(
                                 Text("Use pantry stock", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                 Text(availabilityText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Switch(checked = component.useStock, onCheckedChange = null, enabled = enabled)
+                            Switch(
+                                checked = component.useStock,
+                                onCheckedChange = null,
+                                enabled = enabled,
+                                colors = androidx.compose.material3.SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
                         }
                     }
 

@@ -30,21 +30,24 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.budgetmeals.app.data.AppSnapshot
 import com.budgetmeals.app.data.MealReconciliation
 import com.budgetmeals.app.data.MealStatus
+import com.budgetmeals.app.data.MealType
 import com.budgetmeals.app.state.BudgetMath
 import com.budgetmeals.app.state.BudgetViewModel
 import com.budgetmeals.app.ui.icons.AppIcons
 import kotlin.math.roundToInt
 
-private enum class MealReviewChoice {
+internal enum class MealReviewChoice {
     FULL,
     LEFTOVERS,
     SKIPPED,
@@ -57,8 +60,14 @@ internal fun DayReviewSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
-    val submission = rememberFormSubmission(onDismiss)
-    var selectedDate by remember { mutableStateOf(snapshot.today) }
+    val editorIdentity = "day_review"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    val context = LocalContext.current
+    var selectedDate by rememberSaveable(
+        key = "${draftKey}_selectedDate",
+        stateSaver = localDateSaver,
+    ) { mutableStateOf(snapshot.today) }
     val selectableDates = remember(snapshot.today) {
         (0..6).map { snapshot.today.minusDays(it.toLong()) }
     }
@@ -102,8 +111,60 @@ internal fun DayReviewSheet(
             }
         }
     }
-    var choices by remember(selectedDate, plan, logs) { mutableStateOf(initialChoices) }
-    var leftoverPercent by remember(selectedDate, plan, logs) { mutableStateOf(initialLeftoverPercent) }
+    var choices by rememberSaveable(
+        selectedDate,
+        key = "${draftKey}_${selectedDate}_choices",
+        stateSaver = mealReviewChoicesSaver,
+    ) { mutableStateOf(initialChoices) }
+    var leftoverPercent by rememberSaveable(
+        selectedDate,
+        key = "${draftKey}_${selectedDate}_leftoverPercent",
+        stateSaver = mealLeftoverPercentSaver,
+    ) { mutableStateOf(initialLeftoverPercent) }
+    var editedChoices by rememberSaveable(
+        selectedDate,
+        key = "${draftKey}_${selectedDate}_editedChoices",
+    ) { mutableStateOf(emptySet<String>()) }
+    var editedPercents by rememberSaveable(
+        selectedDate,
+        key = "${draftKey}_${selectedDate}_editedPercents",
+    ) { mutableStateOf(emptySet<String>()) }
+
+    LaunchedEffect(initialChoices, initialLeftoverPercent) {
+        val mergedChoices = plan.keys.associateWith { mealType ->
+            if (editedChoices.contains(mealType.name) && choices.containsKey(mealType)) {
+                choices.getValue(mealType)
+            } else {
+                initialChoices[mealType] ?: MealReviewChoice.UNRECORDED
+            }
+        }
+        if (mergedChoices != choices) {
+            choices = mergedChoices
+        }
+        val mergedPercents = plan.keys.associateWith { mealType ->
+            if (editedPercents.contains(mealType.name) && leftoverPercent.containsKey(mealType)) {
+                leftoverPercent.getValue(mealType)
+            } else {
+                initialLeftoverPercent[mealType] ?: "25"
+            }
+        }
+        if (mergedPercents != leftoverPercent) {
+            leftoverPercent = mergedPercents
+        }
+    }
+
+    val onChoiceSelected: (MealType, MealReviewChoice) -> Unit = { mealType, newChoice ->
+        editedChoices = editedChoices + mealType.name
+        choices = choices + (mealType to newChoice)
+        if (newChoice == MealReviewChoice.LEFTOVERS && leftoverPercent[mealType].isNullOrBlank()) {
+            val defaultPct = initialLeftoverPercent[mealType] ?: "25"
+            leftoverPercent = leftoverPercent + (mealType to defaultPct)
+        }
+    }
+    val onPercentChanged: (MealType, String) -> Unit = { mealType, newPercent ->
+        editedPercents = editedPercents + mealType.name
+        leftoverPercent = leftoverPercent + (mealType to newPercent)
+    }
 
     val wasClosed = snapshot.dayClosure(selectedDate) != null
 
@@ -137,7 +198,7 @@ internal fun DayReviewSheet(
 
     SheetBody(
         title = if (wasClosed) "Review $dateLabel meals" else "Close $dateLabel meals",
-        onClose = onDismiss,
+        onClose = draft.dismiss,
     ) {
         Text(
             "Select date to review:",
@@ -178,13 +239,36 @@ internal fun DayReviewSheet(
                     ),
                 )
             }
+            // Date picker button for any past date
+            FilterChip(
+                selected = selectedDate !in selectableDates,
+                onClick = {
+                    android.app.DatePickerDialog(
+                        context,
+                        { _, y, m, dom -> selectedDate = java.time.LocalDate.of(y, m + 1, dom) },
+                        selectedDate.year,
+                        selectedDate.monthValue - 1,
+                        selectedDate.dayOfMonth,
+                    ).apply { datePicker.maxDate = System.currentTimeMillis() }.show()
+                },
+                label = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(AppIcons.CalendarMonth, contentDescription = "Pick date", modifier = Modifier.size(16.dp))
+                        Text(if (selectedDate !in selectableDates) BudgetMath.formatDate(selectedDate) else "More dates…")
+                    }
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AccentMint.copy(alpha = 0.16f),
+                    selectedLabelColor = AccentMintLight,
+                ),
+            )
         }
         Spacer(Modifier.height(14.dp))
 
         if (plan.isEmpty()) {
             AnimatedSaveHint("There are no planned meals for ${BudgetMath.formatDate(selectedDate)}.")
             Spacer(Modifier.height(18.dp))
-            PrimaryButton("Back", onDismiss, icon = AppIcons.ArrowBack)
+            PrimaryButton("Back", draft.dismiss, icon = AppIcons.ArrowBack)
             return@SheetBody
         }
 
@@ -265,33 +349,28 @@ internal fun DayReviewSheet(
                             label = "Ate all",
                             selected = choice == MealReviewChoice.FULL,
                             selectedColor = AccentMint,
-                            onClick = { choices = choices + (mealType to MealReviewChoice.FULL) },
+                            onClick = { onChoiceSelected(mealType, MealReviewChoice.FULL) },
                             modifier = Modifier.weight(1f),
                         )
                         ReviewChoiceButton(
                             label = "Left some",
                             selected = choice == MealReviewChoice.LEFTOVERS,
                             selectedColor = AccentAmber,
-                            onClick = {
-                                choices = choices + (mealType to MealReviewChoice.LEFTOVERS)
-                                if (leftoverPercent[mealType].isNullOrBlank()) {
-                                    leftoverPercent = leftoverPercent + (mealType to "25")
-                                }
-                            },
+                            onClick = { onChoiceSelected(mealType, MealReviewChoice.LEFTOVERS) },
                             modifier = Modifier.weight(1f),
                         )
                         ReviewChoiceButton(
                             label = "Skipped",
                             selected = choice == MealReviewChoice.SKIPPED,
                             selectedColor = ErrorRed,
-                            onClick = { choices = choices + (mealType to MealReviewChoice.SKIPPED) },
+                            onClick = { onChoiceSelected(mealType, MealReviewChoice.SKIPPED) },
                             modifier = Modifier.weight(1f),
                         )
                         ReviewChoiceButton(
                             label = "Missed",
                             selected = choice == MealReviewChoice.UNRECORDED,
                             selectedColor = TextMuted,
-                            onClick = { choices = choices + (mealType to MealReviewChoice.UNRECORDED) },
+                            onClick = { onChoiceSelected(mealType, MealReviewChoice.UNRECORDED) },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -300,7 +379,7 @@ internal fun DayReviewSheet(
                             value = leftoverPercent[mealType].orEmpty(),
                             onValueChange = { raw ->
                                 percentInput(raw)?.let { sanitized ->
-                                    leftoverPercent = leftoverPercent + (mealType to sanitized)
+                                    onPercentChanged(mealType, sanitized)
                                 }
                             },
                             label = "Percent left over",
@@ -386,9 +465,13 @@ internal fun DayReviewSheet(
                         status = status,
                     )
                 }
-                submission.submit { complete -> viewModel.reconcileMeals(selectedDate, entries, complete) }
+                draft.submission.submit { complete ->
+                    viewModel.reconcileMeals(selectedDate, entries) { success ->
+                        complete(success)
+                    }
+                }
             },
-            enabled = plan.isNotEmpty() && !submission.isSaving,
+            enabled = plan.isNotEmpty() && !draft.submission.isSaving,
             icon = AppIcons.FactCheck,
         )
     }

@@ -81,7 +81,9 @@ class BudgetDatabase(context: Context) : BudgetDao(context) {
                 recurring_frequency TEXT,
                 is_correction INTEGER NOT NULL DEFAULT 0,
                 recurring_schedule_id TEXT,
-                is_budget_transfer INTEGER NOT NULL DEFAULT 0
+                is_budget_transfer INTEGER NOT NULL DEFAULT 0,
+                food_classification TEXT,
+                notes TEXT NOT NULL DEFAULT ''
             )
             """.trimIndent(),
         )
@@ -96,7 +98,8 @@ class BudgetDatabase(context: Context) : BudgetDao(context) {
                 day_of_week TEXT,
                 notes TEXT NOT NULL DEFAULT '',
                 is_custom INTEGER NOT NULL DEFAULT 0,
-                components_json TEXT NOT NULL DEFAULT ''
+                components_json TEXT NOT NULL DEFAULT '',
+                meal_marker TEXT NOT NULL DEFAULT 'UNMARKED'
             )
             """.trimIndent(),
         )
@@ -113,7 +116,9 @@ class BudgetDatabase(context: Context) : BudgetDao(context) {
                 consumed_cost REAL NOT NULL DEFAULT 0,
                 foods TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'EATEN',
-                components_json TEXT NOT NULL DEFAULT ''
+                components_json TEXT NOT NULL DEFAULT '',
+                cash_paid REAL,
+                meal_marker TEXT NOT NULL DEFAULT 'UNMARKED'
             )
             """.trimIndent(),
         )
@@ -177,6 +182,7 @@ class BudgetDatabase(context: Context) : BudgetDao(context) {
                 foods TEXT NOT NULL DEFAULT '',
                 components_json TEXT NOT NULL DEFAULT '',
                 is_cleared INTEGER NOT NULL DEFAULT 0,
+                meal_marker TEXT NOT NULL DEFAULT 'UNMARKED',
                 UNIQUE(date, meal_type)
             )
             """.trimIndent(),

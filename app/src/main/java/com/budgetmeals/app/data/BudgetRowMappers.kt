@@ -108,6 +108,8 @@ internal fun readExpense(cursor: Cursor): Expense = with(cursor) {
         isCorrection = boolean("is_correction"),
         recurringScheduleId = optionalString("recurring_schedule_id"),
         isBudgetTransfer = optionalBoolean("is_budget_transfer", false),
+        foodClassification = optionalString("food_classification"),
+        notes = optionalString("notes").orEmpty(),
     )
 }
 
@@ -124,6 +126,7 @@ internal fun readTemplate(cursor: Cursor): MealTemplate = with(cursor) {
         notes = string("notes"),
         isCustom = boolean("is_custom"),
         components = MealDataCodec.decodeComponents(string("components_json")),
+        marker = enumValueOrDefault(optionalString("meal_marker").orEmpty(), MealMarker.UNMARKED),
     )
 }
 
@@ -141,6 +144,8 @@ internal fun readMealLog(cursor: Cursor): MealLog = with(cursor) {
         foods = string("foods"),
         status = enumValueOrDefault(string("status"), MealStatus.EATEN),
         components = MealDataCodec.decodeComponents(string("components_json")),
+        cashPaid = optionalDouble("cash_paid"),
+        marker = enumValueOrDefault(optionalString("meal_marker").orEmpty(), MealMarker.UNMARKED),
     )
 }
 
@@ -183,6 +188,7 @@ internal fun readDayPlan(cursor: Cursor): DailyMealPlan = with(cursor) {
         foods = string("foods"),
         components = MealDataCodec.decodeComponents(string("components_json")),
         isCleared = optionalBoolean("is_cleared", false),
+        marker = enumValueOrDefault(optionalString("meal_marker").orEmpty(), MealMarker.UNMARKED),
     )
 }
 

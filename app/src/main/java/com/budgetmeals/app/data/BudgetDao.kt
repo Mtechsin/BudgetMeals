@@ -221,40 +221,18 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         writableDatabase.delete("stock", null, null)
     }
 
-    fun loadSamplePantry(today: LocalDate = LocalDate.now()) {
-        val sampleStock = listOf(
-            StockItem("jam", "Jam", ItemCategory.FOOD_STAPLE, "g", 650.0, 55.0, today, null, BatchType.MONTHLY, 30.0, 0.0, notes = "Monthly staple", catalogId = "catalog_jam", packageLabel = "jar (380g)", packageSize = 380.0),
-            StockItem("oil", "Oil", ItemCategory.FOOD_STAPLE, "ml", 1_000.0, 120.0, today, null, BatchType.MONTHLY, 15.0, catalogId = "catalog_oil", packageLabel = "bottle (700ml)", packageSize = 700.0),
-            StockItem("tea", "Tea", ItemCategory.FOOD_STAPLE, "g", 200.0, 50.0, today, null, BatchType.MONTHLY, 5.0, catalogId = "catalog_tea", packageLabel = "pack (100g)", packageSize = 100.0),
-            StockItem("sugar", "Sugar", ItemCategory.FOOD_STAPLE, "g", 1_000.0, 40.0, today, null, BatchType.MONTHLY, 20.0, catalogId = "catalog_sugar"),
-            StockItem("eggs", "Eggs", ItemCategory.FOOD_FRESH, "egg", 12.0, 60.0, today, null, BatchType.WEEKLY, 1.5, catalogId = "catalog_eggs", packageLabel = "carton (30)", packageSize = 30.0),
-            StockItem("cheese", "Cheese", ItemCategory.FOOD_FRESH, "g", 250.0, 25.0, today, null, BatchType.WEEKLY, 25.0, catalogId = "catalog_cheese", packageLabel = "tub (500g)", packageSize = 500.0),
-            StockItem("yogurt", "Yogurt", ItemCategory.FOOD_FRESH, "cup", 5.0, 25.0, today, null, BatchType.WEEKLY, 0.8, catalogId = "catalog_yogurt", packageLabel = "pack (6)", packageSize = 6.0),
-            StockItem("tomatoes", "Tomatoes", ItemCategory.FOOD_FRESH, "g", 1_000.0, 30.0, today, null, BatchType.WEEKLY, 150.0, catalogId = "catalog_tomatoes"),
-            StockItem("cucumbers", "Cucumbers", ItemCategory.FOOD_FRESH, "g", 1_000.0, 25.0, today, null, BatchType.WEEKLY, 100.0, catalogId = "catalog_cucumbers"),
-            StockItem("fruit", "Fruit", ItemCategory.FOOD_FRESH, "g", 1_000.0, 35.0, today, null, BatchType.WEEKLY, 200.0, catalogId = "catalog_fruit"),
-        )
-        sampleStock.forEach { sample ->
-            val alreadyPresent = readableDatabase.query(
-                "stock", arrayOf("id"), "id = ? OR catalog_id = ?",
-                arrayOf(sample.id, sample.catalogId), null, null, null, "1",
-            ).use { it.moveToFirst() }
-            if (!alreadyPresent) upsertStock(sample)
-        }
-    }
-
     fun addUsage(id: String, amount: Double, date: LocalDate = LocalDate.now()): Boolean {
         require(amount.isFinite() && amount > 0.0) { "Enter a positive usage amount." }
         val db = writableDatabase
         db.beginTransaction()
         try {
             val current = loadStockById(id) ?: return false
-            val safeAmount = amount.coerceAtMost(current.remainingQuantity)
-            if (safeAmount <= 0.0) return false
+            if (current.remainingQuantity <= 0.0) return false
+            if (amount > current.remainingQuantity) return false
             upsertStock(current.copy(
-                consumedQuantity = current.consumedQuantity + safeAmount,
-                usageHistory = current.usageHistory + safeAmount,
-                datedUsageHistory = current.datedUsageHistory + DatedUsage(date, safeAmount),
+                consumedQuantity = current.consumedQuantity + amount,
+                usageHistory = current.usageHistory + amount,
+                datedUsageHistory = current.datedUsageHistory + DatedUsage(date, amount),
             ))
             db.setTransactionSuccessful()
             return true
@@ -290,6 +268,8 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("is_correction", if (expense.isCorrection) 1 else 0)
             put("recurring_schedule_id", expense.recurringScheduleId)
             put("is_budget_transfer", if (expense.isBudgetTransfer) 1 else 0)
+            put("food_classification", expense.foodClassification)
+            put("notes", expense.notes)
         }
         check(writableDatabase.insertWithOnConflict("expenses", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
             "Could not save the expense."
@@ -354,6 +334,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("notes", template.notes)
             put("is_custom", if (template.isCustom) 1 else 0)
             put("components_json", MealDataCodec.encodeComponents(template.components))
+            put("meal_marker", template.marker.name)
         }
         val inserted = writableDatabase.insertWithOnConflict("meal_templates", null, values, SQLiteDatabase.CONFLICT_REPLACE)
         check(inserted != -1L) { "Could not save the meal. Please try again." }
@@ -437,6 +418,8 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         put("foods", log.foods)
         put("status", log.status.name)
         put("components_json", MealDataCodec.encodeComponents(log.components))
+        put("cash_paid", log.cashPaid)
+        put("meal_marker", log.marker.name)
     }
 
     private fun dayClosureValues(closure: DayClosure): ContentValues = ContentValues().apply {
@@ -646,7 +629,34 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         db.beginTransaction()
         try {
             reverseMealConsumption(db, id)
+            // If the meal had an explicit cash expense recorded, preserve actual spending by decoupling the expense ID
+            val expenseCursor = db.rawQuery(
+                "SELECT amount, date, description, food_classification FROM expenses WHERE id = ?",
+                arrayOf(MealSpending.expenseId(id)),
+            )
+            var preservedExpense: ContentValues? = null
+            expenseCursor.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val amount = cursor.getDouble(0)
+                    if (amount > 0.0) {
+                        preservedExpense = ContentValues().apply {
+                            put("id", UUID.randomUUID().toString())
+                            put("category_id", "food")
+                            put("amount", amount)
+                            put("date", cursor.getLong(1))
+                            put("description", cursor.getString(2) ?: "Meal purchase")
+                            put("is_recurring", 0)
+                            put("is_correction", 0)
+                            put("is_budget_transfer", 0)
+                            put("food_classification", cursor.getString(3) ?: "meal")
+                        }
+                    }
+                }
+            }
             MealExpenseLedger.delete(db, id)
+            if (preservedExpense != null) {
+                db.insert("expenses", null, preservedExpense)
+            }
             db.delete("meal_logs", "id = ?", arrayOf(id))
             if (date != null) db.delete("day_closures", "date = ?", arrayOf(date.toEpochDay().toString()))
             db.setTransactionSuccessful()
@@ -729,6 +739,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
                 put("foods", template.notes)
                 put("components_json", MealDataCodec.encodeComponents(template.components))
                 put("is_cleared", 0)
+                put("meal_marker", template.marker.name)
             }
             val rowId = db.insertWithOnConflict("day_plans", null, values, SQLiteDatabase.CONFLICT_IGNORE)
             if (rowId != -1L) {
@@ -777,6 +788,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
                         put("foods", template.notes)
                         put("components_json", MealDataCodec.encodeComponents(template.components))
                         put("is_cleared", 0)
+                        put("meal_marker", template.marker.name)
                     }
                     db.insertWithOnConflict("day_plans", null, values, SQLiteDatabase.CONFLICT_IGNORE)
                 }
@@ -817,6 +829,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
                     put("foods", template?.notes ?: "")
                     put("components_json", MealDataCodec.encodeComponents(template?.components ?: emptyList()))
                     put("is_cleared", if (template == null) 1 else 0)
+                    put("meal_marker", template?.marker?.name ?: MealMarker.UNMARKED.name)
                 }
                 db.insertWithOnConflict("day_plans", null, values, SQLiteDatabase.CONFLICT_REPLACE)
             }
@@ -837,19 +850,27 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         writableDatabase.delete("day_closures", "date = ?", arrayOf(date.toEpochDay().toString()))
     }
 
-    fun autoClosePastDays(today: LocalDate, closedAt: LocalDateTime = LocalDateTime.now()) {
+    fun autoClosePastDays(
+        today: LocalDate,
+        closedAt: LocalDateTime = LocalDateTime.now(),
+        settings: BudgetSettings? = null,
+    ) {
+        val cutoffDate = if (settings != null && settings.dinnerEnd <= settings.dinnerStart && closedAt.toLocalTime() < settings.dinnerEnd) {
+            today.minusDays(1)
+        } else {
+            today
+        }
         val openDates = readableDatabase.rawQuery(
             "SELECT days.date FROM (SELECT date FROM day_plans UNION SELECT date FROM meal_logs) AS days " +
                 "LEFT JOIN day_closures AS closure ON closure.date = days.date " +
                 "WHERE days.date < ? AND closure.date IS NULL ORDER BY days.date ASC",
-            arrayOf(today.toEpochDay().toString()),
+            arrayOf(cutoffDate.toEpochDay().toString()),
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) add(LocalDate.ofEpochDay(cursor.getLong(0)))
             }
         }
         closeDates(openDates, closedAt)
-        writableDatabase.delete("day_plans", "date < ?", arrayOf(today.minusDays(90).toEpochDay().toString()))
     }
 
     fun closeDay(date: LocalDate, closedAt: LocalDateTime = LocalDateTime.now()) {
@@ -931,6 +952,6 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
     companion object {
         const val DATABASE_NAME = "budget_meals.db"
-        const val DATABASE_VERSION = 14
+        const val DATABASE_VERSION = 16
     }
 }

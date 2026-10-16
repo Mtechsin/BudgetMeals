@@ -105,10 +105,22 @@ import com.budgetmeals.app.state.BudgetViewModel
 import com.budgetmeals.app.ui.icons.AppIcons
 import com.budgetmeals.app.ui.theme.Motion
 import com.budgetmeals.app.ui.theme.extendedColors
+import android.content.Intent
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.collectAsState
+import androidx.documentfile.provider.DocumentFile
+import com.budgetmeals.app.backup.BackupManager
+import com.budgetmeals.app.backup.BackupPreview
+import com.budgetmeals.app.backup.SpreadsheetMlWorkbook
+import java.io.File
+import java.io.FileOutputStream
 import java.time.Duration
 import java.time.LocalDate
 import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -121,6 +133,9 @@ private enum class MainTab(val route: String, val label: String) {
 }
 
 sealed interface AppSheet {
+    data object LogFood : AppSheet
+    data class HelpMeChoose(val mealType: MealType? = null) : AppSheet
+    data class MealAction(val mealType: MealType, val date: LocalDate) : AppSheet
     data object QuickAdd : AppSheet
     data object AddPurchase : AppSheet
     data class EditStock(val item: StockItem) : AppSheet
@@ -222,6 +237,165 @@ fun BudgetMealsApp(
                 throw error
             } catch (error: Exception) {
                 viewModel.notify(error.message ?: "The selected food catalog file could not be read.")
+            }
+        }
+    }
+
+    val backupManager = remember { BackupManager(context) }
+    val backupState by backupManager.state.collectAsState()
+
+    // Trigger debounced backup after data changes if backup folder is set
+    LaunchedEffect(uiState.snapshot) {
+        if (backupState.folderUri != null && !backupState.needsFolderReselection) {
+            backupManager.scheduleDebouncedBackup()
+        }
+    }
+
+    // Connect backup folder
+    val openBackupFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            val folder = DocumentFile.fromTreeUri(context, uri)
+            backupManager.setBackupFolder(uri, folder?.name ?: "Selected folder")
+            viewModel.notify("Backup folder connected: ${folder?.name ?: "Selected folder"}")
+        } catch (e: Exception) {
+            viewModel.notify(e.message ?: "Failed to connect backup folder")
+        }
+    }
+
+    // Restore backup
+    var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
+    var restorePreview by remember { mutableStateOf<BackupPreview?>(null) }
+    var showRestoreConfirmDialog by remember { mutableStateOf(false) }
+
+    val restoreBackupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            try {
+                val preview = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        backupManager.previewBackup(stream)
+                    } ?: error("Could not open backup file")
+                }
+                pendingRestoreUri = uri
+                restorePreview = preview
+                showRestoreConfirmDialog = true
+            } catch (e: Exception) {
+                viewModel.notify("Invalid backup archive: ${e.message}")
+            }
+        }
+    }
+
+    // Save Excel (.xlsx)
+    val saveExcelLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            try {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { os ->
+                        SpreadsheetMlWorkbook.generate(uiState.snapshot, os)
+                    } ?: error("Could not write to file")
+                }
+                viewModel.notify("Excel workbook saved successfully.")
+            } catch (e: Exception) {
+                viewModel.notify("Failed to save Excel file: ${e.message}")
+            }
+        }
+    }
+
+    // Share Excel (.xlsx)
+    val onShareExcel: () -> Unit = {
+        coroutineScope.launch {
+            try {
+                val file = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    val cacheDir = File(context.cacheDir, "exports").apply { mkdirs() }
+                    val exportFile = File(cacheDir, "BudgetMeals_export_${LocalDate.now()}.xlsx")
+                    FileOutputStream(exportFile).use { fos ->
+                        SpreadsheetMlWorkbook.generate(uiState.snapshot, fos)
+                    }
+                    exportFile
+                }
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file,
+                )
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "Share BudgetMeals Excel export"))
+            } catch (e: Exception) {
+                viewModel.notify("Share failed: ${e.message}")
+            }
+        }
+    }
+
+    // Save CSV Zip
+    val saveCsvZipLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            try {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { os ->
+                        SpreadsheetMlWorkbook.generateCsvZip(uiState.snapshot, os)
+                    } ?: error("Could not write to file")
+                }
+                viewModel.notify("CSV package saved successfully.")
+            } catch (e: Exception) {
+                viewModel.notify("Failed to save CSV package: ${e.message}")
+            }
+        }
+    }
+
+    // Share CSV Zip
+    val onShareCsvZip: () -> Unit = {
+        coroutineScope.launch {
+            try {
+                val file = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    val cacheDir = File(context.cacheDir, "exports").apply { mkdirs() }
+                    val exportFile = File(cacheDir, "BudgetMeals_tables_${LocalDate.now()}.zip")
+                    FileOutputStream(exportFile).use { fos ->
+                        SpreadsheetMlWorkbook.generateCsvZip(uiState.snapshot, fos)
+                    }
+                    exportFile
+                }
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file,
+                )
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "Share BudgetMeals CSV package"))
+            } catch (e: Exception) {
+                viewModel.notify("Share failed: ${e.message}")
+            }
+        }
+    }
+
+    // Manual backup action
+    val onBackupNow: () -> Unit = {
+        coroutineScope.launch {
+            val result = backupManager.performManualBackup()
+            result.onSuccess { msg ->
+                viewModel.notify(msg)
+            }.onFailure { err ->
+                viewModel.notify(err.message ?: "Backup failed")
             }
         }
     }
@@ -386,7 +560,7 @@ fun BudgetMealsApp(
         if (pagerState.isScrollInProgress) pagerState.targetPage else pagerState.currentPage,
     ) { MainTab.HOME }
     val mainFab = when (activeTab) {
-        MainTab.HOME -> FabAction("Add", AppSheet.QuickAdd)
+        MainTab.HOME -> null
         MainTab.PLAN -> FabAction("New meal", AppSheet.AddTemplate)
         MainTab.STOCK -> FabAction("Purchase", AppSheet.AddPurchase)
         MainTab.SHOP -> FabAction("Add item", AppSheet.AddShopping)
@@ -510,6 +684,10 @@ fun BudgetMealsApp(
                                 when (tab) {
                                     MainTab.HOME -> HomeScreen(
                                         snapshot = uiState.snapshot,
+                                        onLogFood = { openSheet(AppSheet.LogFood) },
+                                        onHelpMeChoose = { mealType -> openSheet(AppSheet.HelpMeChoose(mealType)) },
+                                        onOpenMealAction = { mealType, date -> openSheet(AppSheet.MealAction(mealType, date)) },
+                                        onOpenSpending = { openDetail("spending") },
                                         onOpenShopping = { openMainTab(MainTab.SHOP) },
                                         onOpenStock = { openMainTab(MainTab.STOCK) },
                                         onOpenPlan = { openMainTab(MainTab.PLAN) },
@@ -566,12 +744,25 @@ fun BudgetMealsApp(
                                         onOpenFoodCatalog = { openDetail("items") },
                                         onOpenSettings = { openSheet(AppSheet.Settings) },
                                         onOpenBudgetCorrection = { openSheet(AppSheet.BudgetCorrection) },
-                                        onExport = {
-                                            viewModel.exportCsv { csvToShare = it }
-                                        },
                                         onThemeModeChange = viewModel::setThemeMode,
                                         onResetPantry = viewModel::resetPantryToEmpty,
-                                        onLoadSamplePantry = viewModel::loadSamplePantry,
+                                        onOpenFoodSpending = { openDetail("spending") },
+                                        backupFolderName = backupState.folderDisplayName,
+                                        lastBackupTimeText = backupState.lastBackupTime?.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")),
+                                        isBackupPermissionLost = backupState.needsFolderReselection,
+                                        onChooseBackupFolder = { openBackupFolderLauncher.launch(null) },
+                                        onBackupNow = onBackupNow,
+                                        onRestoreBackup = {
+                                            restoreBackupLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                                        },
+                                        onSaveExcel = {
+                                            saveExcelLauncher.launch("BudgetMeals_${LocalDate.now()}.xlsx")
+                                        },
+                                        onShareExcel = onShareExcel,
+                                        onSaveCsvZip = {
+                                            saveCsvZipLauncher.launch("BudgetMeals_tables_${LocalDate.now()}.zip")
+                                        },
+                                        onShareCsvZip = onShareCsvZip,
                                     )
                                 }
                             }
@@ -681,6 +872,13 @@ fun BudgetMealsApp(
                                         snapshot = uiState.snapshot,
                                         onBack = { detailRoute = null },
                                         onSaveToday = viewModel::saveTodayToSpares,
+                                    )
+
+                                    "spending" -> FoodSpendingScreen(
+                                        snapshot = uiState.snapshot,
+                                        onBack = { detailRoute = null },
+                                        onEditExpense = { openSheet(AppSheet.EditExpense(it)) },
+                                        onEditPurchase = { openSheet(AppSheet.EditStock(it)) },
                                     )
                                 }
                             }
@@ -799,6 +997,7 @@ fun BudgetMealsApp(
                         onDismiss = {
                             if (sheetGeneration == generationAtPresentation && sheet === activeSheet) closeSheet()
                         },
+                        onOpenSheet = openSheet,
                         onDismissGuardChanged = { guard ->
                             if (sheetGeneration == generationAtPresentation && sheet === activeSheet) {
                                 sheetDismissGuard = guard
@@ -808,6 +1007,71 @@ fun BudgetMealsApp(
                 }
             }
         }
+    }
+
+    if (showRestoreConfirmDialog && restorePreview != null && pendingRestoreUri != null) {
+        val preview = restorePreview!!
+        AlertDialog(
+            onDismissRequest = {
+                showRestoreConfirmDialog = false
+                pendingRestoreUri = null
+                restorePreview = null
+            },
+            title = { Text("Restore backup archive?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Archive export date: ${preview.exportedAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}")
+                    Text("Contains: ${preview.expensesCount} expenses, ${preview.stockCount} stock items, ${preview.mealsCount} meals, ${preview.plansCount} day plans.")
+                    Text(
+                        "Your current database will be safely backed up to a recovery copy before replacement.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                PrimaryButton(
+                    text = "Confirm restore",
+                    onClick = {
+                        val uri = pendingRestoreUri
+                        showRestoreConfirmDialog = false
+                        if (uri != null) {
+                            coroutineScope.launch {
+                                try {
+                                    val success = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                                            backupManager.restoreBackup(stream)
+                                        } ?: false
+                                    }
+                                    if (success) {
+                                        viewModel.refresh()
+                                        viewModel.notify("Data restored successfully.")
+                                    } else {
+                                        viewModel.notify("Restore failed. Previous data was preserved.")
+                                    }
+                                } catch (e: Exception) {
+                                    viewModel.notify("Restore failed: ${e.message ?: "Invalid backup"}")
+                                } finally {
+                                    pendingRestoreUri = null
+                                    restorePreview = null
+                                }
+                            }
+                        }
+                    },
+                )
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showRestoreConfirmDialog = false
+                        pendingRestoreUri = null
+                        restorePreview = null
+                    },
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
 

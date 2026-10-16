@@ -2,15 +2,20 @@ package com.budgetmeals.app.state
 
 import com.budgetmeals.app.data.AppSnapshot
 import com.budgetmeals.app.data.BatchType
+import com.budgetmeals.app.data.BudgetSettings
 import com.budgetmeals.app.data.Expense
 import com.budgetmeals.app.data.FoodCatalogItem
 import com.budgetmeals.app.data.MealComponent
+import com.budgetmeals.app.data.MealMarker
+import com.budgetmeals.app.data.MealStatus
 import com.budgetmeals.app.data.MealTemplate
 import com.budgetmeals.app.data.MealType
 import com.budgetmeals.app.data.StockItem
 import com.budgetmeals.app.data.Units
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -207,7 +212,7 @@ object BudgetMath {
         return covered.toDouble() / stockComponents.size.toDouble()
     }
 
-    private fun componentCostPerPortion(
+    internal fun componentCostPerPortion(
         component: MealComponent,
         catalog: FoodCatalogItem,
         basePerComponentUnit: Double,
@@ -618,3 +623,446 @@ fun buildBalancedWeek(snapshot: AppSnapshot, start: LocalDate = BudgetMath.curre
 
     return resultDays
 }
+
+data class MissingIngredient(
+    val name: String,
+    val quantity: Double,
+    val unit: String,
+    val estimatedCost: Double,
+    val priceKnown: Boolean,
+    val catalogId: String? = null,
+)
+
+enum class RecommendationKind(val label: String) {
+    PRACTICAL("Practical choice"),
+    DIFFERENT("Something different"),
+    NICER("A nicer meal"),
+}
+
+data class MealIngredientAnalysis(
+    val availableIngredients: List<String>,
+    val missingIngredients: List<MissingIngredient>,
+    val additionalCost: Double,
+    val hasUnknownPrice: Boolean,
+    val inStockRatio: Double,
+)
+
+data class MealRecommendation(
+    val template: MealTemplate,
+    val kind: RecommendationKind,
+    val availableIngredients: List<String>,
+    val missingIngredients: List<MissingIngredient>,
+    val estimatedAdditionalCost: Double,
+    val hasUnknownPrice: Boolean,
+    val inStockPortion: Double,
+)
+
+fun analyzeMealIngredients(snapshot: AppSnapshot, template: MealTemplate): MealIngredientAnalysis {
+    val components = template.components.ifEmpty {
+        com.budgetmeals.app.data.MealDataCodec.legacyComponents(template.notes)
+    }
+    val availableList = mutableListOf<String>()
+    val missingList = mutableListOf<MissingIngredient>()
+    var additionalCost = 0.0
+    var unknownPrice = false
+    val remainingPortions = snapshot.catalogAvailablePortions.toMutableMap()
+
+    if (components.isEmpty()) {
+        if (template.cost > 0.0) {
+            missingList.add(MissingIngredient(template.name, 1.0, "meal", template.cost, true))
+            additionalCost = template.cost
+        } else {
+            missingList.add(MissingIngredient(template.name, 1.0, "meal", 0.0, false))
+            unknownPrice = true
+        }
+        return MealIngredientAnalysis(availableList, missingList, additionalCost, unknownPrice, 0.0)
+    }
+
+    var coveredComponents = 0
+
+    for (component in components) {
+        val catalog = if (component.catalogId != null) {
+            snapshot.foodCatalogById[component.catalogId]
+        } else {
+            snapshot.foodCatalogByName[component.name.lowercase(Locale.US)]
+        }
+        if (!component.useStock || catalog == null || !catalog.hasUsableConversion) {
+            val cost = if (component.costPerUnit > 0.0) component.estimatedCost else 0.0
+            val priceKnown = component.costPerUnit > 0.0
+            if (!priceKnown) unknownPrice = true
+            missingList.add(MissingIngredient(component.name, component.quantity, component.unit, cost, priceKnown, catalog?.id))
+            additionalCost += cost
+            continue
+        }
+
+        val basePerUnit = Units.basePerUnit(component.unit, catalog) ?: 0.0
+        val basePerPortion = catalog.baseUnitsPerPortion
+        if (basePerUnit <= 0.0 || basePerPortion <= 0.0) {
+            val cost = if (component.costPerUnit > 0.0) component.estimatedCost else 0.0
+            val priceKnown = component.costPerUnit > 0.0
+            if (!priceKnown) unknownPrice = true
+            missingList.add(MissingIngredient(component.name, component.quantity, component.unit, cost, priceKnown, catalog.id))
+            additionalCost += cost
+            continue
+        }
+
+        val requiredPortions = component.quantity * basePerUnit / basePerPortion
+        val available = remainingPortions.getOrDefault(catalog.id, 0.0)
+        if (available >= requiredPortions - 0.0001) {
+            remainingPortions[catalog.id] = (available - requiredPortions).coerceAtLeast(0.0)
+            availableList.add(component.name)
+            coveredComponents++
+        } else {
+            val missingPortions = (requiredPortions - available).coerceAtLeast(0.0)
+            remainingPortions[catalog.id] = 0.0
+            if (available > 0.0001) {
+                availableList.add("${component.name} (partial)")
+            }
+            val missingQty = (missingPortions * basePerPortion / basePerUnit).coerceAtLeast(0.0)
+            val unitCost = BudgetMath.componentCostPerPortion(component, catalog, basePerUnit).takeIf { it > 0.0 }
+                ?: BudgetMath.catalogCostPerPortion(snapshot, catalog)
+            val priceKnown = (catalog.priceKnown && catalog.hasKnownPrice && unitCost > 0.0) || component.costPerUnit > 0.0
+            val missingCost = if (priceKnown) missingPortions * unitCost else 0.0
+            if (!priceKnown) unknownPrice = true
+            missingList.add(MissingIngredient(component.name, missingQty, component.unit, missingCost, priceKnown, catalog.id))
+            additionalCost += missingCost
+        }
+    }
+    val inStockRatio = if (components.isNotEmpty()) coveredComponents.toDouble() / components.size.toDouble() else 0.0
+    return MealIngredientAnalysis(availableList, missingList, additionalCost, unknownPrice, inStockRatio)
+}
+
+data class ActiveMealStatus(
+    val activeMealType: MealType?,
+    val mealDate: LocalDate,
+    val nextMealType: MealType?,
+    val nextMealStartTime: LocalTime?,
+)
+
+fun activeMealStatus(
+    settings: BudgetSettings,
+    now: LocalDateTime = LocalDateTime.now(),
+): ActiveMealStatus {
+    val time = now.toLocalTime()
+    val today = now.toLocalDate()
+    val windows = settings.mealWindows()
+
+    for (window in windows) {
+        if (window.contains(time)) {
+            val date = if (window.mealType == MealType.DINNER && window.isOvernight && time < window.end) {
+                today.minusDays(1)
+            } else {
+                today
+            }
+            return ActiveMealStatus(
+                activeMealType = window.mealType,
+                mealDate = date,
+                nextMealType = null,
+                nextMealStartTime = null,
+            )
+        }
+    }
+
+    val timeMinute = time.hour * 60 + time.minute
+    val nextWindow = windows.minByOrNull { window ->
+        val startMinute = window.start.hour * 60 + window.start.minute
+        (startMinute - timeMinute + 1440) % 1440
+    }
+
+    return ActiveMealStatus(
+        activeMealType = null,
+        mealDate = today,
+        nextMealType = nextWindow?.mealType,
+        nextMealStartTime = nextWindow?.start,
+    )
+}
+
+fun helpMeChooseRecommendations(
+    snapshot: AppSnapshot,
+    mealType: MealType? = null,
+    showNiceMeals: Boolean = false,
+): List<MealRecommendation> {
+    var templates = snapshot.templates
+    if (templates.isEmpty()) return emptyList()
+
+    if (mealType != null) {
+        templates = templates.filter { it.mealType == mealType }
+        if (templates.isEmpty()) return emptyList()
+    }
+
+    templates = if (showNiceMeals) {
+        templates.filter { it.marker == MealMarker.NICE }
+    } else {
+        templates.filter { it.marker != MealMarker.NICE }
+    }
+    if (templates.isEmpty()) return emptyList()
+
+    val today = snapshot.today
+    val sevenDaysAgo = today.minusDays(7)
+
+    val eatenRecentMealNames = snapshot.mealLogs
+        .filter { it.date >= sevenDaysAgo && it.date <= today && (it.status == MealStatus.EATEN || it.status == MealStatus.PARTIAL) }
+        .map { it.name.trim().lowercase(Locale.US) }
+        .toSet()
+
+    val eatenRecentExpenseNames = snapshot.expenses
+        .filter {
+            it.date >= sevenDaysAgo && it.date <= today && !it.isBudgetTransfer &&
+                (it.foodClassification in listOf("ready_to_eat", "restaurant", "meal", "street_food", "snack") ||
+                    it.description.contains("snack", ignoreCase = true) ||
+                    it.description.contains("takeaway", ignoreCase = true))
+        }
+        .map { it.description.trim().lowercase(Locale.US) }
+        .toSet()
+
+    val repetitionNames = eatenRecentMealNames + eatenRecentExpenseNames
+
+    val exclusions = snapshot.settings.foodExclusions
+        .split(',', ';', '\n')
+        .map { it.trim().lowercase(Locale.US) }
+        .filter { it.isNotBlank() }
+
+    val preferences = snapshot.settings.foodPreferences
+        .split(',', ';', '\n')
+        .map { it.trim().lowercase(Locale.US) }
+        .filter { it.isNotBlank() }
+
+    fun matchesAny(text: String, keywords: List<String>): Boolean {
+        val lower = text.lowercase(Locale.US)
+        return keywords.any { lower.contains(it) }
+    }
+
+    val nonExcluded = templates.filter { t ->
+        if (exclusions.isEmpty()) true
+        else {
+            val combined = t.name + " " + t.notes + " " + t.components.joinToString(" ") { it.name }
+            !matchesAny(combined, exclusions)
+        }
+    }
+    if (nonExcluded.isEmpty()) return emptyList()
+
+    data class Candidate(
+        val template: MealTemplate,
+        val analysis: MealIngredientAnalysis,
+        val isRecentlyEaten: Boolean,
+        val matchesPreference: Boolean,
+    )
+
+    val candidates = nonExcluded.map { template ->
+        val analysis = analyzeMealIngredients(snapshot, template)
+        val templateLower = template.name.trim().lowercase(Locale.US)
+        val isRecent = repetitionNames.any { it.contains(templateLower) || templateLower.contains(it) }
+        val combined = template.name + " " + template.notes + " " + template.components.joinToString(" ") { it.name }
+        val matchesPref = preferences.isNotEmpty() && matchesAny(combined, preferences)
+        Candidate(template, analysis, isRecent, matchesPref)
+    }
+
+    val practicalCandidate = candidates.sortedWith(
+        compareBy<Candidate> { it.isRecentlyEaten }
+            .thenBy { it.analysis.hasUnknownPrice }
+            .thenByDescending { it.analysis.inStockRatio }
+            .thenBy { it.analysis.additionalCost }
+            .thenBy { it.template.cost }
+    ).firstOrNull() ?: return emptyList()
+
+    val practicalRec = MealRecommendation(
+        template = practicalCandidate.template,
+        kind = RecommendationKind.PRACTICAL,
+        availableIngredients = practicalCandidate.analysis.availableIngredients,
+        missingIngredients = practicalCandidate.analysis.missingIngredients,
+        estimatedAdditionalCost = practicalCandidate.analysis.additionalCost,
+        hasUnknownPrice = practicalCandidate.analysis.hasUnknownPrice,
+        inStockPortion = practicalCandidate.analysis.inStockRatio,
+    )
+
+    val remainingAfterPractical = candidates.filter { it.template.id != practicalCandidate.template.id }
+    if (remainingAfterPractical.isEmpty()) return listOf(practicalRec)
+
+    val practicalComponentNames = practicalCandidate.template.components.map { it.name.trim().lowercase(Locale.US) }.toSet()
+    val differentCandidate = remainingAfterPractical.sortedWith(
+        compareBy<Candidate> { it.isRecentlyEaten }
+            .thenBy { it.analysis.hasUnknownPrice }
+            .thenBy { candidate ->
+                candidate.template.components.count { practicalComponentNames.contains(it.name.trim().lowercase(Locale.US)) }
+            }
+            .thenBy { it.analysis.additionalCost }
+    ).firstOrNull()
+
+    val differentRec = differentCandidate?.let {
+        MealRecommendation(
+            template = it.template,
+            kind = RecommendationKind.DIFFERENT,
+            availableIngredients = it.analysis.availableIngredients,
+            missingIngredients = it.analysis.missingIngredients,
+            estimatedAdditionalCost = it.analysis.additionalCost,
+            hasUnknownPrice = it.analysis.hasUnknownPrice,
+            inStockPortion = it.analysis.inStockRatio,
+        )
+    }
+
+    val remainingAfterDifferent = remainingAfterPractical.filter { differentCandidate == null || it.template.id != differentCandidate.template.id }
+
+    val thirdCandidate = remainingAfterDifferent
+        .sortedWith(
+            compareBy<Candidate> { it.isRecentlyEaten }
+                .thenByDescending { it.matchesPreference }
+                .thenByDescending { it.analysis.inStockRatio }
+                .thenBy { it.analysis.additionalCost }
+                .thenBy { it.analysis.hasUnknownPrice }
+        ).firstOrNull()
+
+    val thirdRec = thirdCandidate?.let {
+        val kind = if (showNiceMeals || it.template.marker == MealMarker.NICE) {
+            RecommendationKind.NICER
+        } else {
+            RecommendationKind.DIFFERENT
+        }
+        MealRecommendation(
+            template = it.template,
+            kind = kind,
+            availableIngredients = it.analysis.availableIngredients,
+            missingIngredients = it.analysis.missingIngredients,
+            estimatedAdditionalCost = it.analysis.additionalCost,
+            hasUnknownPrice = it.analysis.hasUnknownPrice,
+            inStockPortion = it.analysis.inStockRatio,
+        )
+    }
+
+    return listOfNotNull(practicalRec, differentRec, thirdRec).distinctBy { it.template.id }.take(3)
+}
+
+data class SpendingComparison(
+    val currentSpent: Double,
+    val previousSpent: Double,
+    val difference: Double,
+    val comparisonLabel: String,
+) {
+    val label: String get() = comparisonLabel
+}
+
+fun weekFoodSpendingComparison(snapshot: AppSnapshot, weekStart: LocalDate): SpendingComparison {
+    val today = snapshot.today
+    val weekEnd = weekStart.plusDays(6)
+    val elapsedDays = when {
+        today in weekStart..weekEnd -> java.time.temporal.ChronoUnit.DAYS.between(weekStart, today).toInt() + 1
+        weekEnd < today -> 7
+        else -> 0
+    }
+    val currentSpent = (0 until elapsedDays).sumOf { BudgetMath.foodSpentOn(weekStart.plusDays(it.toLong()), snapshot) }
+    val prevWeekStart = weekStart.minusWeeks(1)
+    val prevSpent = (0 until elapsedDays).sumOf { BudgetMath.foodSpentOn(prevWeekStart.plusDays(it.toLong()), snapshot) }
+    val diff = prevSpent - currentSpent
+    val label = when {
+        elapsedDays == 0 -> "No days elapsed"
+        prevSpent <= 0.0 && currentSpent > 0.0 -> "First recorded week"
+        prevSpent <= 0.0 && currentSpent <= 0.0 -> "No food spending recorded"
+        diff > 0.001 -> "${BudgetMath.money(diff)} less than the same days last week"
+        diff < -0.001 -> "${BudgetMath.money(-diff)} more than the same days last week"
+        else -> "Same as the same days last week"
+    }
+    return SpendingComparison(currentSpent, prevSpent, diff, label)
+}
+
+fun monthFoodSpendingComparison(snapshot: AppSnapshot, monthStart: LocalDate): SpendingComparison {
+    val today = snapshot.today
+    val monthLength = monthStart.lengthOfMonth()
+    val isCurrentMonth = today.year == monthStart.year && today.month == monthStart.month
+    val elapsedDays = when {
+        isCurrentMonth -> today.dayOfMonth
+        monthStart < today.withDayOfMonth(1) -> monthLength
+        else -> 0
+    }
+    val currentSpent = (1..elapsedDays).sumOf { BudgetMath.foodSpentOn(monthStart.withDayOfMonth(it), snapshot) }
+    val prevMonthStart = monthStart.minusMonths(1)
+    val prevMonthLength = prevMonthStart.lengthOfMonth()
+    val prevElapsedDays = minOf(elapsedDays, prevMonthLength)
+    val prevSpent = (1..prevElapsedDays).sumOf { BudgetMath.foodSpentOn(prevMonthStart.withDayOfMonth(it), snapshot) }
+    val diff = prevSpent - currentSpent
+    val label = when {
+        elapsedDays == 0 -> "No days elapsed"
+        prevSpent <= 0.0 && currentSpent > 0.0 -> "First recorded month"
+        prevSpent <= 0.0 && currentSpent <= 0.0 -> "No food spending recorded"
+        diff > 0.001 -> "${BudgetMath.money(diff)} less than the same days last month"
+        diff < -0.001 -> "${BudgetMath.money(-diff)} more than the same days last month"
+        else -> "Same as the same days last month"
+    }
+    return SpendingComparison(currentSpent, prevSpent, diff, label)
+}
+
+data class HabitObservation(
+    val title: String,
+    val message: String,
+    val destination: String,
+)
+
+fun habitObservationForHome(snapshot: AppSnapshot): HabitObservation? {
+    if (!snapshot.settings.habitMessagesEnabled) return null
+    val today = snapshot.today
+    val weekStart = BudgetMath.currentWeekStart(today)
+    val weekComparison = weekFoodSpendingComparison(snapshot, weekStart)
+    val weeklyFoodLimit = snapshot.settings.weeklyFoodLimit
+
+    // Priority 1: Configured budget overruns
+    if (weeklyFoodLimit > 0.0 && weekComparison.currentSpent > weeklyFoodLimit) {
+        return HabitObservation(
+            title = "Weekly target",
+            message = "Food spending this week (${BudgetMath.money(weekComparison.currentSpent)}) is ${BudgetMath.money(weekComparison.currentSpent - weeklyFoodLimit)} above your weekly target.",
+            destination = "spending",
+        )
+    }
+    if (snapshot.settings.monthlyFoodBudget > 0.0 && snapshot.foodSpentThisMonth > snapshot.settings.monthlyFoodBudget) {
+        return HabitObservation(
+            title = "Monthly ceiling",
+            message = "Food spending this month (${BudgetMath.money(snapshot.foodSpentThisMonth)}) has reached your ${BudgetMath.money(snapshot.settings.monthlyFoodBudget)} monthly ceiling.",
+            destination = "spending",
+        )
+    }
+    if (snapshot.settings.dailyFoodBudget > 0.0 && snapshot.todayFoodSpent > snapshot.settings.dailyFoodBudget) {
+        return HabitObservation(
+            title = "Today's spending",
+            message = "Food spending today (${BudgetMath.money(snapshot.todayFoodSpent)}) is above your daily average target of ${BudgetMath.money(snapshot.settings.dailyFoodBudget)}.",
+            destination = "spending",
+        )
+    }
+
+    // Priority 2: Repeated ready-made/snack spending
+    val sevenDaysAgo = today.minusDays(7)
+    val recentSnacks = snapshot.expenses.filter {
+        it.date >= sevenDaysAgo && it.date <= today && !it.isBudgetTransfer &&
+            (it.foodClassification in listOf("ready_to_eat", "ready_made", "snack", "street_food", "restaurant") ||
+                it.description.contains("snack", ignoreCase = true) ||
+                it.description.contains("takeaway", ignoreCase = true))
+    }
+    if (recentSnacks.size >= 3) {
+        val totalSnacks = recentSnacks.sumOf { it.amount }
+        return HabitObservation(
+            title = "Ready-made food",
+            message = "${recentSnacks.size} ready-made or snack purchases recorded in the last 7 days (${BudgetMath.money(totalSnacks)}).",
+            destination = "spending",
+        )
+    }
+
+    // Priority 3: Expired pantry items
+    val expiredItems = snapshot.stock.filter { !it.isFinished && it.expiryDate != null && it.expiryDate <= today }
+    if (expiredItems.isNotEmpty()) {
+        val names = expiredItems.take(2).joinToString(", ") { it.name }
+        val msg = if (expiredItems.size == 1) "$names has passed its expiry date." else "${expiredItems.size} pantry items have passed their expiry date ($names)."
+        return HabitObservation(
+            title = "Pantry notice",
+            message = msg,
+            destination = "stock",
+        )
+    }
+
+    // Quiet encouragement if progress
+    if (weekComparison.difference > 0.001 && weekComparison.previousSpent > 0.0) {
+        return HabitObservation(
+            title = "Weekly progress",
+            message = "${BudgetMath.money(weekComparison.difference)} less spent than the same days last week.",
+            destination = "spending",
+        )
+    }
+
+    return null
+}
+

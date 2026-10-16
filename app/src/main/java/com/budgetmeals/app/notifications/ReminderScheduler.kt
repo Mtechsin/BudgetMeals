@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import com.budgetmeals.app.data.BudgetRepository
 import com.budgetmeals.app.data.BudgetSettings
 import java.time.LocalTime
 import java.time.ZonedDateTime
@@ -16,7 +17,7 @@ object ReminderScheduler {
 
     fun sync(context: Context, settings: BudgetSettings) {
         val alarmManager = context.getSystemService(AlarmManager::class.java)
-        scheduleClose(alarmManager, context)
+        scheduleClose(alarmManager, context, settings)
         if (settings.remindersEnabled) {
             scheduleReminder(alarmManager, context)
         } else {
@@ -27,7 +28,7 @@ object ReminderScheduler {
     fun scheduleDaily(context: Context) {
         val alarmManager = context.getSystemService(AlarmManager::class.java)
         scheduleReminder(alarmManager, context)
-        scheduleClose(alarmManager, context)
+        scheduleClose(context)
     }
 
     private fun scheduleReminder(alarmManager: AlarmManager, context: Context) {
@@ -42,13 +43,14 @@ object ReminderScheduler {
         )
     }
 
-    fun scheduleClose(context: Context) {
+    fun scheduleClose(context: Context, settings: BudgetSettings? = null) {
         val alarmManager = context.getSystemService(AlarmManager::class.java)
-        scheduleClose(alarmManager, context)
+        val s = settings ?: BudgetRepository(context).readSettings()
+        scheduleClose(alarmManager, context, s)
     }
 
-    private fun scheduleClose(alarmManager: AlarmManager, context: Context) {
-        val schedule = nextDayClose(ZonedDateTime.now())
+    private fun scheduleClose(alarmManager: AlarmManager, context: Context, settings: BudgetSettings? = null) {
+        val schedule = nextDayClose(ZonedDateTime.now(), settings)
         val intent = Intent(context, DayCloseReceiver::class.java).apply {
             putExtra(DayCloseReceiver.EXTRA_CLOSE_DATE, schedule.date.toEpochDay())
         }

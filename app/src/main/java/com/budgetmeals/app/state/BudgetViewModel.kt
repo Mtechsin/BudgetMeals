@@ -14,10 +14,12 @@ import com.budgetmeals.app.data.MealLog
 import com.budgetmeals.app.data.MealReconciliation
 import com.budgetmeals.app.data.MealStatus
 import com.budgetmeals.app.data.MealTemplate
+import com.budgetmeals.app.state.activeMealStatus
 import com.budgetmeals.app.data.MealType
 import com.budgetmeals.app.data.ShoppingItem
 import com.budgetmeals.app.data.StockItem
 import java.time.LocalDate
+import java.time.LocalDateTime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,6 +84,28 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         mutate("Purchase saved. Added to spending${if (rememberForNextShop) " and next shop" else ""}.", onComplete) {
             repository.recordPurchase(item, rememberForNextShop, catalogItem)
+        }
+    }
+
+    fun recordFoodExpense(
+        amount: Double,
+        date: LocalDate = LocalDate.now(),
+        name: String = "",
+        classification: String? = null,
+        notes: String = "",
+        onComplete: (Boolean) -> Unit = {},
+    ) {
+        mutate("Food expense saved.", onComplete) {
+            repository.recordFoodExpense(amount, date, name, classification, notes)
+        }
+    }
+
+    fun addMissingIngredientsToShopping(
+        items: List<MissingIngredient>,
+        onComplete: (Boolean) -> Unit = {},
+    ) {
+        mutate("${items.size} missing ${if (items.size == 1) "item" else "items"} added to shopping list.", onComplete) {
+            repository.addMissingIngredientsToShopping(items)
         }
     }
 
@@ -166,14 +190,24 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun recordMeal(template: MealTemplate, date: LocalDate = LocalDate.now(), costOverride: Double? = null) {
+    fun recordMeal(
+        template: MealTemplate,
+        date: LocalDate = LocalDate.now(),
+        costOverride: Double? = null,
+        cashPaidOverride: Double? = null,
+        onComplete: (Boolean) -> Unit = {},
+    ) {
         val current = _uiState.value.snapshot
-        if (date != current.today || date != LocalDate.now()) {
+        val now = LocalDateTime.now()
+        val activeWindowDate = activeMealStatus(current.settings, now).mealDate
+        if (date != current.today && date != LocalDate.now() && date != activeWindowDate) {
             showMessage("Only today's open meal can be marked from the plan.")
+            onComplete(false)
             return
         }
         if (current.dayClosure(date) != null) {
             showMessage("This day is already closed. Open the day review to change it.")
+            onComplete(false)
             return
         }
         val mealCost = costOverride ?: template.cost
@@ -187,8 +221,22 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             foods = template.foodSummary,
             status = MealStatus.EATEN,
             components = template.components.ifEmpty { com.budgetmeals.app.data.MealDataCodec.legacyComponents(template.notes) },
+            cashPaid = cashPaidOverride,
+            marker = template.marker,
         )
-        mutate("${template.name} marked as eaten.") { repository.recordMeal(log) }
+        mutate("${template.name} marked as eaten.", onComplete) { repository.recordMeal(log) }
+    }
+
+    fun skipMeal(date: LocalDate, mealType: MealType, onComplete: (Boolean) -> Unit = {}) {
+        mutate("${mealType.label} skipped for today.", onComplete) {
+            repository.skipMeal(date, mealType)
+        }
+    }
+
+    fun undoSkipMeal(date: LocalDate, mealType: MealType, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Skip undone for ${mealType.label.lowercase()}.", onComplete) {
+            repository.undoSkipMeal(date, mealType)
+        }
     }
 
     fun saveMealLog(log: MealLog) {
@@ -408,12 +456,6 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     fun resetPantryToEmpty() {
         mutate("Pantry reset to empty.") {
             repository.resetPantryToEmpty()
-        }
-    }
-
-    fun loadSamplePantry() {
-        mutate("Sample pantry loaded.") {
-            repository.loadSamplePantry()
         }
     }
 

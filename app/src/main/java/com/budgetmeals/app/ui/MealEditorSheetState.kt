@@ -5,12 +5,15 @@ import androidx.compose.runtime.saveable.Saver
 import com.budgetmeals.app.data.BatchType
 import com.budgetmeals.app.data.Expense
 import com.budgetmeals.app.data.FoodCatalogItem
+import com.budgetmeals.app.data.FoodCatalogJsonCodec
 import com.budgetmeals.app.data.ItemCategory
 import com.budgetmeals.app.data.MealDataCodec
+import com.budgetmeals.app.data.MealMarker
 import com.budgetmeals.app.data.MealTemplate
 import com.budgetmeals.app.data.MealType
 import com.budgetmeals.app.data.ShoppingItem
 import com.budgetmeals.app.data.StockItem
+import com.budgetmeals.app.data.StockUsageCodec
 import java.time.DayOfWeek
 import java.time.LocalDate
 
@@ -20,6 +23,16 @@ internal val mealEditorSheetSaver = Saver<AppSheet?, Bundle>(
         if (sheet == null) return@Saver null
         Bundle().apply {
             when (sheet) {
+                AppSheet.LogFood -> putString("editor", "log_food")
+                is AppSheet.HelpMeChoose -> {
+                    putString("editor", "help_me_choose")
+                    sheet.mealType?.let { putString("meal_type", it.name) }
+                }
+                is AppSheet.MealAction -> {
+                    putString("editor", "meal_action")
+                    putString("meal_type", sheet.mealType.name)
+                    putString("date", sheet.date.toString())
+                }
                 AppSheet.QuickAdd -> putString("editor", "quick_add")
                 AppSheet.AddPurchase -> putString("editor", "add_purchase")
                 AppSheet.AddExpense -> putString("editor", "add_expense")
@@ -50,6 +63,10 @@ internal val mealEditorSheetSaver = Saver<AppSheet?, Bundle>(
                     putString("date", sheet.expense.date.toString())
                     putString("description", sheet.expense.description)
                     putBoolean("is_transfer", sheet.expense.isBudgetTransfer)
+                    putBoolean("is_recurring", sheet.expense.isRecurring)
+                    putString("recurring_frequency", sheet.expense.recurringFrequency)
+                    putBoolean("is_correction", sheet.expense.isCorrection)
+                    putString("recurring_schedule_id", sheet.expense.recurringScheduleId)
                 }
                 is AppSheet.EditStock -> {
                     putString("editor", "edit_stock")
@@ -77,6 +94,16 @@ internal val mealEditorSheetSaver = Saver<AppSheet?, Bundle>(
     restore = { saved ->
         runCatching {
             when (saved.getString("editor")) {
+                "log_food" -> AppSheet.LogFood
+                "help_me_choose" -> {
+                    val type = saved.getString("meal_type")?.let { runCatching { MealType.valueOf(it) }.getOrNull() }
+                    AppSheet.HelpMeChoose(type)
+                }
+                "meal_action" -> {
+                    val date = LocalDate.parse(requireNotNull(saved.getString("date")))
+                    val type = MealType.valueOf(requireNotNull(saved.getString("meal_type")))
+                    AppSheet.MealAction(type, date)
+                }
                 "quick_add" -> AppSheet.QuickAdd
                 "add_purchase" -> AppSheet.AddPurchase
                 "add_expense" -> AppSheet.AddExpense
@@ -106,6 +133,10 @@ internal val mealEditorSheetSaver = Saver<AppSheet?, Bundle>(
                         amount = saved.getDouble("amount"),
                         date = saved.getString("date")?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now(),
                         description = saved.getString("description").orEmpty(),
+                        isRecurring = saved.getBoolean("is_recurring"),
+                        recurringFrequency = saved.getString("recurring_frequency"),
+                        isCorrection = saved.getBoolean("is_correction"),
+                        recurringScheduleId = saved.getString("recurring_schedule_id"),
                         isBudgetTransfer = saved.getBoolean("is_transfer"),
                     ),
                 )
@@ -130,6 +161,7 @@ private fun Bundle.writeTemplate(template: MealTemplate, prefix: String = "") {
     putString("${prefix}notes", template.notes)
     putBoolean("${prefix}custom", template.isCustom)
     putString("${prefix}components", MealDataCodec.encodeComponents(template.components))
+    putString("${prefix}marker", template.marker.name)
 }
 
 private fun readTemplate(bundle: Bundle, prefix: String = ""): MealTemplate {
@@ -143,6 +175,7 @@ private fun readTemplate(bundle: Bundle, prefix: String = ""): MealTemplate {
         notes = bundle.getString("${prefix}notes").orEmpty(),
         isCustom = bundle.getBoolean("${prefix}custom"),
         components = MealDataCodec.decodeComponents(bundle.getString("${prefix}components").orEmpty()),
+        marker = bundle.getString("${prefix}marker")?.let { runCatching { MealMarker.valueOf(it) }.getOrNull() } ?: MealMarker.UNMARKED,
     )
 }
 
@@ -154,16 +187,22 @@ private fun Bundle.writeStockItem(item: StockItem) {
     putDouble("totalQuantity", item.totalQuantity)
     putDouble("totalPrice", item.totalPrice)
     putString("purchaseDate", item.purchaseDate.toString())
+    putString("expiryDate", item.expiryDate?.toString())
     putString("batchType", item.batchType.name)
     putDouble("usagePerDay", item.estimatedUsagePerDay)
     putDouble("consumedQuantity", item.consumedQuantity)
+    putString("usageHistory", StockUsageCodec.encode(item))
     putString("notes", item.notes)
     putString("catalogId", item.catalogId)
+    putString("linkedExpenseId", item.linkedExpenseId)
     putString("packageLabel", item.packageLabel)
     putDouble("packageSize", item.packageSize)
+    putBoolean("conversionKnown", item.conversionKnown)
 }
 
 private fun readStockItem(bundle: Bundle): StockItem {
+    val purchaseDate = bundle.getString("purchaseDate")?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now()
+    val history = bundle.getString("usageHistory").orEmpty()
     return StockItem(
         id = requireNotNull(bundle.getString("id")),
         name = bundle.getString("name").orEmpty(),
@@ -171,14 +210,19 @@ private fun readStockItem(bundle: Bundle): StockItem {
         unit = bundle.getString("unit") ?: "piece",
         totalQuantity = bundle.getDouble("totalQuantity"),
         totalPrice = bundle.getDouble("totalPrice"),
-        purchaseDate = bundle.getString("purchaseDate")?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now(),
+        purchaseDate = purchaseDate,
+        expiryDate = bundle.getString("expiryDate")?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
         batchType = bundle.getString("batchType")?.let { runCatching { BatchType.valueOf(it) }.getOrNull() } ?: BatchType.MONTHLY,
         estimatedUsagePerDay = bundle.getDouble("usagePerDay"),
         consumedQuantity = bundle.getDouble("consumedQuantity"),
+        usageHistory = StockUsageCodec.decodeAmounts(history),
+        datedUsageHistory = StockUsageCodec.decode(history, purchaseDate),
         notes = bundle.getString("notes").orEmpty(),
         catalogId = bundle.getString("catalogId"),
+        linkedExpenseId = bundle.getString("linkedExpenseId"),
         packageLabel = bundle.getString("packageLabel").orEmpty(),
         packageSize = bundle.getDouble("packageSize"),
+        conversionKnown = if (bundle.containsKey("conversionKnown")) bundle.getBoolean("conversionKnown") else true,
     )
 }
 
@@ -192,6 +236,10 @@ private fun Bundle.writeShoppingItem(item: ShoppingItem) {
     putString("notes", item.note)
     putBoolean("isChecked", item.isChecked)
     putString("createdDate", item.createdDate.toString())
+    putString("sourceItemId", item.sourceItemId)
+    putString("purchaseExpenseId", item.purchaseExpenseId)
+    putString("purchaseStockId", item.purchaseStockId)
+    putBoolean("priceKnown", item.priceKnown)
 }
 
 private fun readShoppingItem(bundle: Bundle): ShoppingItem {
@@ -205,6 +253,10 @@ private fun readShoppingItem(bundle: Bundle): ShoppingItem {
         note = bundle.getString("notes").orEmpty(),
         isChecked = bundle.getBoolean("isChecked"),
         createdDate = bundle.getString("createdDate")?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: LocalDate.now(),
+        sourceItemId = bundle.getString("sourceItemId"),
+        purchaseExpenseId = bundle.getString("purchaseExpenseId"),
+        purchaseStockId = bundle.getString("purchaseStockId"),
+        priceKnown = if (bundle.containsKey("priceKnown")) bundle.getBoolean("priceKnown") else true,
     )
 }
 
@@ -221,6 +273,7 @@ private fun Bundle.writeFoodItem(item: FoodCatalogItem) {
     if (item.purchaseQuantity != null) putDouble("purchaseQuantity", item.purchaseQuantity)
     putString("purchaseUnit", item.purchaseUnit)
     putString("mealUsage", item.mealUsage)
+    putString("priceOptions", FoodCatalogJsonCodec.encodePriceOptions(item.priceOptions))
     putBoolean("priceKnown", item.priceKnown)
     putBoolean("conversionKnown", item.conversionKnown)
 }
@@ -239,6 +292,7 @@ private fun readFoodItem(bundle: Bundle): FoodCatalogItem {
         purchaseQuantity = if (bundle.containsKey("purchaseQuantity")) bundle.getDouble("purchaseQuantity") else null,
         purchaseUnit = bundle.getString("purchaseUnit"),
         mealUsage = bundle.getString("mealUsage").orEmpty(),
+        priceOptions = FoodCatalogJsonCodec.decodePriceOptions(bundle.getString("priceOptions").orEmpty()),
         priceKnown = bundle.getBoolean("priceKnown", true),
         conversionKnown = bundle.getBoolean("conversionKnown", true),
     )

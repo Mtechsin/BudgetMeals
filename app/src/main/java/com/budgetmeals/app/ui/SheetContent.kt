@@ -10,10 +10,23 @@ fun SheetContent(
     viewModel: BudgetViewModel,
     snapshot: AppSnapshot,
     onDismiss: () -> Unit,
+    onOpenSheet: ((AppSheet) -> Unit)? = null,
     onDismissGuardChanged: ((() -> Unit)?) -> Unit = {},
 ) {
     when (sheet) {
         AppSheet.QuickAdd -> Unit // Rendered by BudgetMealsApp (needs to swap to another sheet)
+        AppSheet.LogFood -> LogFoodSheet(snapshot, viewModel, onDismiss)
+        is AppSheet.HelpMeChoose -> HelpMeChooseSheet(snapshot, viewModel, initialMealType = sheet.mealType, onDismiss = onDismiss)
+        is AppSheet.MealAction -> MealActionSheet(
+            mealType = sheet.mealType,
+            date = sheet.date,
+            snapshot = snapshot,
+            viewModel = viewModel,
+            onDismiss = onDismiss,
+            onOpenHelpMeChoose = { type ->
+                onOpenSheet?.invoke(AppSheet.HelpMeChoose(type)) ?: onDismiss()
+            },
+        )
         AppSheet.AddPurchase -> StockFormSheet(null, snapshot, viewModel, onDismiss)
         is AppSheet.EditStock -> StockFormSheet(sheet.item, snapshot, viewModel, onDismiss)
         is AppSheet.LogUsage -> UsageFormSheet(sheet.item, snapshot, viewModel, onDismiss)
