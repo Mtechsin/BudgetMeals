@@ -16,12 +16,17 @@ private fun String.normalizeNumber(): String = map { character ->
 }.joinToString("")
 
 internal fun numberInput(raw: String, decimal: Boolean): String? {
-    val filtered = raw.normalizeNumber().filter { it in '0'..'9' || (decimal && it == '.') }
+    val filtered = raw.trim().normalizeNumber()
+    // Removing arbitrary characters changes the amount (e.g. -25 -> 25 or 1e3 -> 13).
+    if (filtered.any { it !in '0'..'9' && !(decimal && it == '.') }) return null
     if (filtered.count { it == '.' } > 1) return null
     return if (filtered.startsWith('0') && filtered.length > 1 && filtered[1] != '.') {
         filtered.trimStart('0').ifEmpty { "0" }
     } else filtered
 }
+
+internal fun String.isNonNegativeNumber(allowBlank: Boolean = false): Boolean =
+    (allowBlank && isBlank()) || asDoubleOrNull()?.let { it >= 0.0 } == true
 
 internal fun percentInput(raw: String): String? {
     val sanitized = numberInput(raw, decimal = false) ?: return null

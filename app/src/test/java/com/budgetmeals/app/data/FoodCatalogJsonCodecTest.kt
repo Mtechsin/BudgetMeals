@@ -1,9 +1,41 @@
 package com.budgetmeals.app.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FoodCatalogJsonCodecTest {
+    @Test
+    fun invalidExplicitQuantitiesAndPricesCannotBecomeDefaultValues() {
+        for (field in listOf("purchaseQuantity", "portionsPerPurchaseUnit", "purchasePrice", "defaultCostPerPortion")) {
+            assertTrue(FoodCatalogJsonCodec.decode("""{"items":[{"name":"Rice","$field":-1}]}""").isFailure)
+            assertTrue(FoodCatalogJsonCodec.decode("""{"items":[{"name":"Rice","$field":"Infinity"}]}""").isFailure)
+        }
+    }
+
+    @Test
+    fun priceOptionsAloneProvideAKnownDefaultPrice() {
+        val item = FoodCatalogJsonCodec.decode("""{"items":[{"name":"Chips","priceOptions":[10,20]}]}""").getOrThrow().single()
+
+        assertEquals(15.0, item.defaultCostPerPortion, 0.001)
+        assertTrue(item.hasKnownPrice)
+    }
+
+    @Test
+    fun tieredMeasurementAloneProvidesAKnownDefaultPrice() {
+        val item = FoodCatalogJsonCodec.decode("""{"items":[{"name":"Chips","measurement":{"type":"tiered","sizes":[{"name":"Small","price":10},{"name":"Large","price":20}]}}]}""").getOrThrow().single()
+
+        assertEquals(15.0, item.defaultCostPerPortion, 0.001)
+        assertTrue(item.hasKnownPrice)
+    }
+
+    @Test
+    fun fractionOfAPortionKeepsTheActualPriceRatio() {
+        val item = FoodCatalogJsonCodec.decode("""{"items":[{"name":"Saffron","purchaseQuantity":0.00001,"purchasePrice":1,"portionsPerPurchaseUnit":1}]}""").getOrThrow().single()
+
+        assertEquals(100_000.0, item.defaultCostPerPortion, 0.001)
+    }
+
     @Test
     fun foodCatalogJsonRoundTripsAiEditableFields() {
         val original = FoodCatalogItem(

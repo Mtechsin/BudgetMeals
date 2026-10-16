@@ -45,18 +45,25 @@ object MealDataCodec {
         return runCatching {
             val array = JSONArray(raw)
             buildList {
+                val usedIds = mutableSetOf<String>()
                 for (index in 0 until array.length()) {
                     val item = array.optJSONObject(index) ?: continue
                     val name = item.optString("name").trim()
                     if (name.isBlank()) continue
+                    val suppliedId = item.optString("id").ifBlank { "component-$index-${name.hashCode()}" }
+                    var id = suppliedId
+                    var suffix = 0
+                    while (!usedIds.add(id)) {
+                        id = "$suppliedId-$index-${suffix++}"
+                    }
                     add(
                         MealComponent(
-                            id = item.optString("id").ifBlank { "component-$index-${name.hashCode()}" },
+                            id = id,
                             catalogId = item.optString("catalogId").takeUnless { it.isBlank() || it == "null" },
                             name = name,
-                            quantity = item.optDouble("quantity", 1.0).coerceAtLeast(0.0),
+                            quantity = item.optDouble("quantity", 1.0).takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0,
                             unit = item.optString("unit", "piece").ifBlank { "piece" },
-                            costPerUnit = item.optDouble("costPerUnit", 0.0).coerceAtLeast(0.0),
+                            costPerUnit = item.optDouble("costPerUnit", 0.0).takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0,
                             useStock = item.optBoolean("useStock", true),
                         ),
                     )

@@ -2,9 +2,32 @@ package com.budgetmeals.app.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NumberFormattingTest {
+    @Test
+    fun rejectsPastedTextThatWouldSilentlyChangeTheAmount() {
+        assertNull(numberInput("-25", decimal = true))
+        assertNull(numberInput("1e3", decimal = true))
+        assertNull(numberInput("25 EGP", decimal = true))
+        assertNull(numberInput("1.5", decimal = false))
+    }
+
+    @Test
+    fun nonNegativeAmountDistinguishesFreeFromInvalidOrOverflowingPrice() {
+        assertTrue("0".isNonNegativeNumber())
+        assertTrue("12,5".isNonNegativeNumber())
+        assertFalse("".isNonNegativeNumber())
+        assertFalse(".".isNonNegativeNumber())
+        assertFalse("Infinity".isNonNegativeNumber())
+        assertFalse("9".repeat(400).isNonNegativeNumber())
+        assertFalse("-1".isNonNegativeNumber())
+        assertTrue("".isNonNegativeNumber(allowBlank = true))
+        assertFalse(".".isNonNegativeNumber(allowBlank = true))
+    }
+
     @Test
     fun acceptsLocaleDecimalSeparators() {
         val arabicDecimal = "\u0661\u0662\u066B\u0665"

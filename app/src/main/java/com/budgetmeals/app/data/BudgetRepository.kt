@@ -91,12 +91,7 @@ class BudgetRepository(
         database.closeDay(date, LocalDateTime.now(clock))
     }
 
-    @Volatile
-    private var cachedSettings: BudgetSettings? = null
-
-    fun readSettings(forceRefresh: Boolean = false): BudgetSettings {
-        val cached = cachedSettings
-        if (!forceRefresh && cached != null) return cached
+    fun readSettings(): BudgetSettings {
         val storedKoshary = preferences.getString(KEY_KOSHARY_DAY, null)?.let { value ->
             runCatching { DayOfWeek.valueOf(value) }.getOrNull()
         }
@@ -106,7 +101,7 @@ class BudgetRepository(
         val storedTheme = preferences.getString(KEY_THEME_MODE, null)?.let { value ->
             runCatching { AppThemeMode.valueOf(value) }.getOrNull()
         }
-        val settings = BudgetSettings(
+        return BudgetSettings(
             monthlyFoodBudget = preferences.getFloat(KEY_MONTHLY_FOOD, 3_000f).toDouble(),
             dailyFoodBudget = preferences.getFloat(KEY_DAILY_FOOD, 100f).toDouble(),
             weeklyFoodLimit = preferences.getFloat(KEY_WEEKLY_FOOD, 750f).toDouble(),
@@ -120,12 +115,9 @@ class BudgetRepository(
             },
             themeMode = storedTheme ?: AppThemeMode.SYSTEM,
         )
-        cachedSettings = settings
-        return settings
     }
 
     fun saveSettings(settings: BudgetSettings) {
-        cachedSettings = settings
         preferences.edit()
             .putFloat(KEY_MONTHLY_FOOD, settings.monthlyFoodBudget.toFloat())
             .putFloat(KEY_DAILY_FOOD, settings.dailyFoodBudget.toFloat())
@@ -135,7 +127,6 @@ class BudgetRepository(
             .putBoolean(KEY_AUTO_SPARES, settings.autoSaveSpares)
             .putBoolean(KEY_REMINDERS, settings.remindersEnabled)
             .putString(KEY_SHOPPING_DAY, settings.shoppingDay.name)
-            .putString(KEY_LAST_SPARES_DATE, settings.lastSparesAutoSaveDate?.toString())
             .putString(KEY_THEME_MODE, settings.themeMode.name)
             .apply()
         val foodCategory = database.findCategoryById("food")
@@ -207,33 +198,31 @@ class BudgetRepository(
             if (resolvedCatalog != null && database.findFoodCatalogItemById(resolvedCatalog.id) == null) {
                 database.upsertFoodCatalogItem(resolvedCatalog)
             }
-            database.upsertStock(singleMealAdjusted)
-
-            if (existing != null && kotlin.math.abs(existing.totalPrice - singleMealAdjusted.totalPrice) > 0.001) {
-                val diff = singleMealAdjusted.totalPrice - existing.totalPrice
-                val linkedExpense = existing.linkedExpenseId?.let { database.findExpenseById(it) }
+            val linkedExpense = existing?.let {
+                existing.linkedExpenseId?.let { database.findExpenseById(it) }
                     ?: database.findExpenseById("stock-${existing.id}")
                     ?: database.findExpenseForStockPurchase(existing.purchaseDate, existing.name, existing.totalPrice)
-                if (linkedExpense != null) {
-                    database.upsertExpense(
-                        linkedExpense.copy(
-                            amount = singleMealAdjusted.totalPrice,
-                            description = "Bought ${singleMealAdjusted.name}",
-                            categoryId = expenseCategoryId,
-                        ),
-                    )
-                } else {
-                    database.upsertExpense(
-                        Expense(
-                            id = UUID.randomUUID().toString(),
-                            categoryId = expenseCategoryId,
-                            amount = diff,
-                            date = singleMealAdjusted.purchaseDate,
-                            description = "Price correction for ${singleMealAdjusted.name}",
-                            isCorrection = true,
-                        ),
-                    )
-                }
+            }
+            database.upsertStock(singleMealAdjusted.copy(
+                linkedExpenseId = linkedExpense?.id ?: singleMealAdjusted.linkedExpenseId,
+            ))
+
+            if (linkedExpense != null) {
+                database.upsertExpense(linkedExpense.copy(
+                    amount = singleMealAdjusted.totalPrice,
+                    date = singleMealAdjusted.purchaseDate,
+                    description = "Bought ${singleMealAdjusted.name}",
+                    categoryId = expenseCategoryId,
+                ))
+            } else if (existing != null && kotlin.math.abs(existing.totalPrice - singleMealAdjusted.totalPrice) > 0.001) {
+                database.upsertExpense(Expense(
+                    id = UUID.randomUUID().toString(),
+                    categoryId = expenseCategoryId,
+                    amount = singleMealAdjusted.totalPrice - existing.totalPrice,
+                    date = singleMealAdjusted.purchaseDate,
+                    description = "Price correction for ${singleMealAdjusted.name}",
+                    isCorrection = true,
+                ))
             }
 
             if (shoppingItem != null) database.upsertShopping(shoppingItem)
@@ -309,7 +298,6 @@ class BudgetRepository(
         }
         val isHousehold = item.category == ItemCategory.HOUSEHOLD || item.category == ItemCategory.OTHER
         var resolvedCatalog: FoodCatalogItem? = null
-        var isNewCatalog = false
         val baseItem = if (isHousehold) {
             item
         } else {
@@ -318,7 +306,6 @@ class BudgetRepository(
             val catalog = if (existingCatalog != null) {
                 existingCatalog
             } else {
-                isNewCatalog = true
                 FoodCatalogItem(
                     name = item.name,
                     category = item.category,
@@ -349,7 +336,9 @@ class BudgetRepository(
         val db = database.writableDatabase
         db.beginTransaction()
         try {
-            if (resolvedCatalog != null && isNewCatalog) database.upsertFoodCatalogItem(resolvedCatalog)
+            if (resolvedCatalog != null && database.findFoodCatalogItemById(resolvedCatalog.id) == null) {
+                database.upsertFoodCatalogItem(resolvedCatalog)
+            }
             database.upsertStock(singleMealAdjusted)
             database.upsertExpense(expense)
             if (shoppingItem != null) database.upsertShopping(shoppingItem)
@@ -381,21 +370,56 @@ class BudgetRepository(
 
     fun saveExpense(expense: Expense) {
         require(!expense.isMealExpense) { "Change this meal's spending through meal review." }
-        database.upsertExpense(expense.copy(
-            recurringScheduleId = expense.recurringScheduleId ?: if (expense.isRecurring) expense.id else null,
-        ))
+        require(!expense.id.startsWith(SPARES_EXPENSE_PREFIX)) { "Manage this withdrawal from spares." }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            require(!database.expenseHasStockPurchase(expense.id)) {
+                "Manage this purchase from stock, or use Match real spending."
+            }
+            val current = database.findExpenseById(expense.id)
+            database.upsertExpense(expense.copy(
+                recurringScheduleId = expense.recurringScheduleId ?: current?.recurringScheduleId
+                    ?: if (expense.isRecurring) expense.id else null,
+            ))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun deleteExpense(id: String) {
         require(!id.startsWith(MealSpending.EXPENSE_PREFIX)) { "Undo this meal through meal review to remove its spending." }
-        database.deleteExpense(id)
+        require(!id.startsWith(SPARES_EXPENSE_PREFIX)) { "Manage this withdrawal from spares." }
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            require(!database.expenseHasStockPurchase(id)) {
+                "Manage this purchase from stock, or use Match real spending."
+            }
+            database.findExpenseById(id)?.let { expense ->
+                if (expense.isRecurring || expense.recurringScheduleId != null) {
+                    database.stopRecurringSchedule(expense)
+                }
+            }
+            database.deleteExpense(id)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun processRecurringExpenses(today: LocalDate = LocalDate.now(clock)): List<Expense> {
-        val allExpenses = database.loadExpenses()
-        val toGenerate = BudgetMath.computeRecurringExpensesToGenerate(allExpenses, today)
-        toGenerate.forEach { database.upsertExpense(it) }
-        return toGenerate
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val toGenerate = BudgetMath.computeRecurringExpensesToGenerate(database.loadExpenses(), today)
+            toGenerate.forEach { database.upsertExpense(it) }
+            db.setTransactionSuccessful()
+            return toGenerate
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun resetPantryToEmpty() {
@@ -415,51 +439,60 @@ class BudgetRepository(
     }
 
     fun recordMeal(log: MealLog) {
-        val existing = database.loadMealLog(log.date, log.mealType)
-        database.upsertMealLog(
-            log.copy(
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val existing = database.loadMealLog(log.date, log.mealType)
+            database.upsertMealLog(log.copy(
                 id = existing?.id ?: log.id,
                 consumedCost = log.consumedCost.coerceIn(0.0, log.cost.coerceAtLeast(0.0)),
                 foods = log.foods.ifBlank { existing?.foods.orEmpty() },
-                status = log.status,
-            ),
-        )
-        database.deleteDayClosure(log.date)
+            ))
+            database.deleteDayClosure(log.date)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun reconcileMeals(date: LocalDate, entries: List<MealReconciliation>) {
-        val logs = entries.map { entry ->
-            val template = entry.template
-            val existing = database.loadMealLog(date, template.mealType)
-            MealLog(
-                id = existing?.id ?: UUID.randomUUID().toString(),
-                date = date,
-                mealType = template.mealType,
-                templateId = template.id,
-                name = template.name,
-                cost = template.cost,
-                actualTime = existing?.actualTime ?: LocalDateTime.now(clock),
-                consumedCost = entry.consumedCost.coerceIn(0.0, template.cost.coerceAtLeast(0.0)),
-                foods = existing?.foods?.ifBlank { template.foodSummary } ?: template.foodSummary,
-                status = entry.status,
-                components = template.components.ifEmpty { MealDataCodec.legacyComponents(template.notes) },
-            )
+        require(entries.map { it.template.mealType }.distinct().size == entries.size) {
+            "Review each meal type once."
         }
-        val plannedCost = entries.sumOf { it.template.cost }
-        val consumedCost = logs.filter { it.isConsumed }.sumOf { it.consumedCost }
-        val leftoverCost = logs.filter { it.isConsumed }.sumOf { it.leftoverCost }
-        val skippedCost = logs.filter { it.isSkipped }.sumOf { it.cost }
-        database.upsertMealLogs(
-            logs,
-            DayClosure(
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val existingLogs = database.loadMealLogs(date).associateBy { it.mealType }
+            val logs = entries.map { entry ->
+                val template = entry.template
+                val existing = existingLogs[template.mealType]
+                MealLog(
+                    id = existing?.id ?: UUID.randomUUID().toString(),
+                    date = date,
+                    mealType = template.mealType,
+                    templateId = template.id,
+                    name = template.name,
+                    cost = template.cost,
+                    actualTime = existing?.actualTime ?: LocalDateTime.now(clock),
+                    consumedCost = entry.consumedCost.coerceIn(0.0, template.cost.coerceAtLeast(0.0)),
+                    foods = existing?.foods?.ifBlank { template.foodSummary } ?: template.foodSummary,
+                    status = entry.status,
+                    components = template.components.ifEmpty { MealDataCodec.legacyComponents(template.notes) },
+                )
+            }
+            val allLogs = (existingLogs + logs.associateBy { it.mealType }).values
+            database.upsertMealLogs(logs, DayClosure(
                 date = date,
                 closedAt = LocalDateTime.now(clock),
-                plannedCost = plannedCost,
-                consumedCost = consumedCost,
-                leftoverCost = leftoverCost,
-                skippedCost = skippedCost,
-            ),
-        )
+                plannedCost = allLogs.sumOf { it.cost },
+                consumedCost = allLogs.filter { it.isConsumed }.sumOf { it.consumedCost },
+                leftoverCost = allLogs.filter { it.isConsumed }.sumOf { it.leftoverCost },
+                skippedCost = allLogs.filter { it.isSkipped }.sumOf { it.cost },
+            ))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun deleteMealLog(id: String) {
@@ -483,6 +516,7 @@ class BudgetRepository(
     }
 
     fun buyShoppingItem(item: ShoppingItem, price: Double, rememberForNextShop: Boolean = false): Boolean {
+        require(price.isFinite() && price >= 0.0) { "Enter a valid purchase price." }
         val db = database.writableDatabase
         db.beginTransaction()
         try {
@@ -518,7 +552,7 @@ class BudgetRepository(
                     estimatedPrice = price,
                     purchaseExpenseId = expenseId,
                     purchaseStockId = stockId,
-                    priceKnown = price > 0.0,
+                    priceKnown = true,
                 ),
             )
             db.setTransactionSuccessful()
@@ -534,6 +568,9 @@ class BudgetRepository(
         try {
             val current = database.loadShoppingById(item.id) ?: return false
             if (!current.isChecked) return false
+            require(current.purchaseStockId?.let { database.stockHasMealConsumption(it) } != true) {
+                "Undo the meals using this purchase before undoing the purchase."
+            }
             current.purchaseStockId?.let { database.deleteStock(it) }
             current.purchaseExpenseId?.let { database.deleteExpense(it) }
             database.upsertShopping(
@@ -550,14 +587,22 @@ class BudgetRepository(
         }
     }
 
-    fun buyAgainShoppingItem(item: ShoppingItem) {
-        database.upsertShopping(
-            item.copy(
+    fun buyAgainShoppingItem(item: ShoppingItem): Boolean {
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            val current = database.loadShoppingById(item.id) ?: return false
+            if (!current.isChecked) return false
+            database.upsertShopping(current.copy(
                 isChecked = false,
                 purchaseExpenseId = null,
                 purchaseStockId = null,
-            ),
-        )
+            ))
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun spendFromSpares(
@@ -567,6 +612,7 @@ class BudgetRepository(
         expenseCategoryId: String = "spares",
         date: LocalDate = LocalDate.now(clock),
     ) {
+        require(amount.isFinite()) { "Enter a valid savings amount." }
         val positiveAmount = kotlin.math.abs(amount)
         if (positiveAmount <= 0.0) return
         val sparesTransaction = SparesTransaction(
@@ -576,7 +622,7 @@ class BudgetRepository(
             category = if (expenseCategoryId == "food") "daily_savings_spent" else category,
         )
         val expense = Expense(
-            id = UUID.randomUUID().toString(),
+            id = "$SPARES_EXPENSE_PREFIX${sparesTransaction.id}",
             categoryId = expenseCategoryId,
             amount = positiveAmount,
             date = date,
@@ -585,6 +631,8 @@ class BudgetRepository(
         val db = database.writableDatabase
         db.beginTransaction()
         try {
+            val balance = database.loadSnapshot(readSettings(), date).sparesBalance
+            require(positiveAmount <= balance + 0.000001) { "There is not enough money in spares." }
             database.upsertSpares(sparesTransaction)
             database.upsertExpense(expense)
             db.setTransactionSuccessful()
@@ -594,6 +642,7 @@ class BudgetRepository(
     }
 
     fun addSpares(amount: Double, reason: String, category: String? = null, date: LocalDate = LocalDate.now(clock)) {
+        require(amount.isFinite()) { "Enter a valid savings amount." }
         if (amount == 0.0) return
         if (amount < 0.0) {
             spendFromSpares(-amount, reason, category, "spares", date)
@@ -603,26 +652,36 @@ class BudgetRepository(
     }
 
     fun deleteSpares(id: String) {
-        database.deleteSpares(id)
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try {
+            database.deleteExpense("$SPARES_EXPENSE_PREFIX$id")
+            database.deleteSpares(id)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun saveBudgetCorrection(expense: Expense) {
-        database.upsertExpense(expense.copy(categoryId = "food", isCorrection = true))
+        saveExpense(expense.copy(categoryId = "food", isCorrection = true))
     }
 
     fun deleteBudgetCorrection(expense: Expense) {
-        database.deleteExpense(expense.id)
+        deleteExpense(expense.id)
     }
 
     fun saveTodayToSpares(): Double {
         val today = LocalDate.now(clock)
         val db = database.writableDatabase
         var amount = 0.0
-        var settingsToMark: BudgetSettings? = null
+        var markSavedDate = false
         db.beginTransaction()
         try {
-            val currentSettings = readSettings(forceRefresh = true)
-            if (currentSettings.lastSparesAutoSaveDate != today) {
+            val currentSettings = readSettings()
+            val alreadySaved = database.hasSparesTransaction("daily-savings-$today")
+            markSavedDate = alreadySaved
+            if (currentSettings.lastSparesAutoSaveDate != today && !alreadySaved) {
                 val currentSnapshot = database.loadSnapshot(currentSettings, today)
                 amount = currentSnapshot.todayFoodRemaining
             }
@@ -636,14 +695,16 @@ class BudgetRepository(
                         category = "daily_savings",
                     ),
                 )
-                settingsToMark = currentSettings
+                markSavedDate = true
             }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
-        settingsToMark?.let { currentSettings ->
-            saveSettings(currentSettings.copy(lastSparesAutoSaveDate = today))
+        if (markSavedDate) {
+            // This bookkeeping key belongs to the savings operation. Settings forms may
+            // contain an older copy, and saving savings must not overwrite user settings.
+            preferences.edit().putString(KEY_LAST_SPARES_DATE, today.toString()).apply()
         }
         return amount
     }
@@ -684,6 +745,7 @@ class BudgetRepository(
     }
 
     companion object {
+        const val SPARES_EXPENSE_PREFIX = "spares-transaction:"
         private const val KEY_MONTHLY_FOOD = "monthly_food_budget"
         private const val KEY_DAILY_FOOD = "daily_food_budget"
         private const val KEY_WEEKLY_FOOD = "weekly_food_limit"

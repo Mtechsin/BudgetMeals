@@ -88,7 +88,9 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("is_custom", if (category.isCustom) 1 else 0)
             put("sort_order", category.sortOrder)
         }
-        writableDatabase.insertWithOnConflict("categories", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(writableDatabase.insertWithOnConflict("categories", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+            "Could not save the category."
+        }
     }
 
     fun upsertFoodCatalogItems(items: List<FoodCatalogItem>) {
@@ -121,12 +123,21 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("price_known", if (item.priceKnown) 1 else 0)
             put("conversion_known", if (item.conversionKnown) 1 else 0)
         }
-        writableDatabase.insertWithOnConflict("food_catalog", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(writableDatabase.insertWithOnConflict("food_catalog", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+            "Could not save the food."
+        }
     }
 
     fun deleteFoodCatalogItem(id: String) {
-        writableDatabase.delete("food_catalog", "id = ?", arrayOf(id))
-        writableDatabase.execSQL("UPDATE stock SET catalog_id = NULL WHERE catalog_id = ?", arrayOf(id))
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("food_catalog", "id = ?", arrayOf(id))
+            db.execSQL("UPDATE stock SET catalog_id = NULL WHERE catalog_id = ?", arrayOf(id))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun findFoodCatalogItem(name: String): FoodCatalogItem? {
@@ -181,7 +192,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("name", item.name)
             put("category", item.category.name)
             put("unit", item.unit)
-            put("total_quantity", item.totalQuantity.coerceAtLeast(item.consumedQuantity))
+            put("total_quantity", item.totalQuantity.coerceAtLeast(0.0))
             put("total_price", item.totalPrice)
             put("purchase_date", item.purchaseDate.toEpochDay())
             put("expiry_date", item.expiryDate?.toEpochDay())
@@ -198,7 +209,7 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
         }
         val updated = writableDatabase.update("stock", values, "id = ?", arrayOf(item.id))
         if (updated == 0) {
-            writableDatabase.insert("stock", null, values)
+            writableDatabase.insertOrThrow("stock", null, values)
         }
     }
 
@@ -233,21 +244,34 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
     }
 
     fun addUsage(id: String, amount: Double, date: LocalDate = LocalDate.now()): Boolean {
-        val current = loadStockById(id) ?: return false
-        val safeAmount = amount.coerceIn(0.0, current.remainingQuantity)
-        val updated = current.copy(
-            consumedQuantity = (current.consumedQuantity + safeAmount).coerceAtMost(current.totalQuantity),
-            usageHistory = current.usageHistory + safeAmount,
-            datedUsageHistory = current.datedUsageHistory + DatedUsage(date, safeAmount),
-        )
-        upsertStock(updated)
-        return true
+        require(amount.isFinite() && amount > 0.0) { "Enter a positive usage amount." }
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val current = loadStockById(id) ?: return false
+            val safeAmount = amount.coerceAtMost(current.remainingQuantity)
+            if (safeAmount <= 0.0) return false
+            upsertStock(current.copy(
+                consumedQuantity = current.consumedQuantity + safeAmount,
+                usageHistory = current.usageHistory + safeAmount,
+                datedUsageHistory = current.datedUsageHistory + DatedUsage(date, safeAmount),
+            ))
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun loadStockById(id: String): StockItem? {
         return readableDatabase.query("stock", null, "id = ?", arrayOf(id), null, null, null, "1")
             .use { cursor -> if (cursor.moveToFirst()) readStock(cursor) else null }
     }
+
+    fun stockHasMealConsumption(id: String): Boolean = readableDatabase.query(
+        "meal_consumptions", arrayOf("id"), "stock_item_id = ? AND stock_quantity > 0", arrayOf(id),
+        null, null, null, "1",
+    ).use { it.moveToFirst() }
 
     fun loadExpenses(): List<Expense> {
         return readableDatabase.query("expenses", null, null, null, null, null, "date DESC, rowid DESC")
@@ -267,7 +291,9 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("recurring_schedule_id", expense.recurringScheduleId)
             put("is_budget_transfer", if (expense.isBudgetTransfer) 1 else 0)
         }
-        writableDatabase.insertWithOnConflict("expenses", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(writableDatabase.insertWithOnConflict("expenses", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+            "Could not save the expense."
+        }
     }
 
     fun deleteExpense(id: String) {
@@ -277,6 +303,27 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
     fun findExpenseById(id: String): Expense? {
         return readableDatabase.query("expenses", null, "id = ?", arrayOf(id), null, null, null, "1")
             .use { cursor -> if (cursor.moveToFirst()) readExpense(cursor) else null }
+    }
+
+    fun expenseHasStockPurchase(id: String): Boolean = readableDatabase.query(
+        "stock", arrayOf("id"), "linked_expense_id = ? OR 'stock-' || id = ?", arrayOf(id, id),
+        null, null, null, "1",
+    ).use { it.moveToFirst() }
+
+    fun stopRecurringSchedule(expense: Expense) {
+        val values = ContentValues().apply { put("is_recurring", 0) }
+        val scheduleId = expense.recurringScheduleId
+        if (scheduleId != null) {
+            writableDatabase.update("expenses", values, "recurring_schedule_id = ?", arrayOf(scheduleId))
+        } else {
+            val description = expense.description.trim().lowercase(Locale.US)
+            loadExpenses().filter {
+                it.recurringScheduleId == null && it.categoryId == expense.categoryId &&
+                    it.description.trim().lowercase(Locale.US) == description
+            }.forEach {
+                writableDatabase.update("expenses", values, "id = ?", arrayOf(it.id))
+            }
+        }
     }
 
     fun findExpenseForStockPurchase(date: LocalDate, name: String, amount: Double): Expense? {
@@ -336,6 +383,10 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
     fun upsertMealLogs(logs: List<MealLog>, closure: DayClosure? = null) {
         saveMealLogsWithComponents(logs, closure)
     }
+
+    fun loadMealLogs(date: LocalDate): List<MealLog> = readableDatabase.query(
+        "meal_logs", null, "date = ?", arrayOf(date.toEpochDay().toString()), null, null, null,
+    ).use { it.readRows(::readMealLog) }
 
     fun saveMealLogsWithComponents(logs: List<MealLog>, closure: DayClosure? = null) {
         val db = writableDatabase
@@ -620,7 +671,9 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("purchase_stock_id", item.purchaseStockId)
             put("price_known", if (item.priceKnown) 1 else 0)
         }
-        writableDatabase.insertWithOnConflict("shopping", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(writableDatabase.insertWithOnConflict("shopping", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+            "Could not save the shopping item."
+        }
     }
 
     fun deleteShopping(id: String) {
@@ -633,14 +686,20 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
             put("date", transaction.date.toEpochDay())
             put("amount", transaction.amount)
             put("reason", transaction.reason)
-            put("category", transaction.category)
+            put("category", transaction.category.orEmpty())
         }
-        writableDatabase.insertWithOnConflict("spares", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(writableDatabase.insertWithOnConflict("spares", null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+            "Could not save the savings transaction."
+        }
     }
 
     fun deleteSpares(id: String) {
         writableDatabase.delete("spares", "id = ?", arrayOf(id))
     }
+
+    fun hasSparesTransaction(id: String): Boolean = readableDatabase.query(
+        "spares", arrayOf("id"), "id = ?", arrayOf(id), null, null, null, "1",
+    ).use { it.moveToFirst() }
 
     fun ensureDayPlan(date: LocalDate, templates: List<MealTemplate>): Int {
         val db = writableDatabase
@@ -780,9 +839,9 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
     fun autoClosePastDays(today: LocalDate, closedAt: LocalDateTime = LocalDateTime.now()) {
         val openDates = readableDatabase.rawQuery(
-            "SELECT DISTINCT plan.date FROM day_plans AS plan " +
-                "LEFT JOIN day_closures AS closure ON closure.date = plan.date " +
-                "WHERE plan.date < ? AND closure.date IS NULL ORDER BY plan.date ASC",
+            "SELECT days.date FROM (SELECT date FROM day_plans UNION SELECT date FROM meal_logs) AS days " +
+                "LEFT JOIN day_closures AS closure ON closure.date = days.date " +
+                "WHERE days.date < ? AND closure.date IS NULL ORDER BY days.date ASC",
             arrayOf(today.toEpochDay().toString()),
         ).use { cursor ->
             buildList {
@@ -809,53 +868,69 @@ abstract class BudgetDao(context: Context) : SQLiteOpenHelper(context, DATABASE_
 
     private fun closeDates(dates: List<LocalDate>, closedAt: LocalDateTime) {
         dates.forEach { date ->
-            val plans = loadDayPlans(date)
-            if (plans.isEmpty()) return@forEach
-            val logs = plans.filter { !it.isCleared }.map { plan ->
-                val existing = loadMealLog(date, plan.mealType)
-                existing?.let {
-                    if (it.status == MealStatus.PLANNED) it.copy(status = MealStatus.UNRECORDED, consumedCost = 0.0) else it
-                } ?: MealLog(
-                    id = "closed-$date-${plan.mealType.name}",
-                    date = date,
-                    mealType = plan.mealType,
-                    templateId = plan.templateId,
-                    name = plan.name,
-                    cost = plan.cost,
-                    actualTime = date.plusDays(1).atTime(23, 59),
-                    consumedCost = 0.0,
-                    foods = plan.foods,
-                    status = MealStatus.UNRECORDED,
-                    components = plan.components.ifEmpty { MealDataCodec.legacyComponents(plan.foods) },
-                )
-            }
-            val plannedCost = plans.filter { !it.isCleared }.sumOf { it.cost }
-            val consumedCost = logs.filter { it.isConsumed }.sumOf { it.consumedCost }
-            val leftoverCost = logs.filter { it.isConsumed }.sumOf { it.leftoverCost }
-            val skippedCost = logs.filter { it.isSkipped }.sumOf { it.cost }
-            upsertMealLogs(
-                logs,
-                DayClosure(
+            val db = writableDatabase
+            db.beginTransaction()
+            try {
+                val isClosed = db.query(
+                    "day_closures", arrayOf("date"), "date = ?", arrayOf(date.toEpochDay().toString()),
+                    null, null, null, "1",
+                ).use { it.moveToFirst() }
+                if (isClosed) return@forEach
+                val plans = loadDayPlans(date)
+                val existingLogs = loadMealLogs(date)
+                if (plans.isEmpty() && existingLogs.isEmpty()) return@forEach
+                val byType = existingLogs.associateBy { it.mealType }.toMutableMap()
+                val changedLogs = existingLogs.filter { it.status == MealStatus.PLANNED }.map {
+                    it.copy(status = MealStatus.UNRECORDED, consumedCost = 0.0)
+                }.toMutableList()
+                plans.filter { !it.isCleared && it.mealType !in byType }.forEach { plan ->
+                    changedLogs += MealLog(
+                        id = "closed-$date-${plan.mealType.name}",
+                        date = date,
+                        mealType = plan.mealType,
+                        templateId = plan.templateId,
+                        name = plan.name,
+                        cost = plan.cost,
+                        actualTime = date.atTime(23, 59),
+                        consumedCost = 0.0,
+                        foods = plan.foods,
+                        status = MealStatus.UNRECORDED,
+                        components = plan.components.ifEmpty { MealDataCodec.legacyComponents(plan.foods) },
+                    )
+                }
+                changedLogs.forEach { byType[it.mealType] = it }
+                val logs = byType.values
+                // Closing a day must not reverse stock or re-price already recorded meals.
+                upsertMealLogs(changedLogs, DayClosure(
                     date = date,
                     closedAt = closedAt,
-                    plannedCost = plannedCost,
-                    consumedCost = consumedCost,
-                    leftoverCost = leftoverCost,
-                    skippedCost = skippedCost,
-                ),
-            )
+                    plannedCost = logs.sumOf { it.cost },
+                    consumedCost = logs.filter { it.isConsumed }.sumOf { it.consumedCost },
+                    leftoverCost = logs.filter { it.isConsumed }.sumOf { it.leftoverCost },
+                    skippedCost = logs.filter { it.isSkipped }.sumOf { it.cost },
+                ))
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
         }
     }
 
     fun clearAllUserData() {
         val db = writableDatabase
-        listOf("day_closures", "day_plans", "meal_consumptions", "meal_logs", "shopping", "spares", "expenses", "stock", "food_catalog", "meal_templates", "categories").forEach {
-            db.delete(it, null, null)
+        db.beginTransaction()
+        try {
+            listOf("day_closures", "day_plans", "meal_consumptions", "meal_logs", "shopping", "spares", "expenses", "stock", "food_catalog", "meal_templates", "categories").forEach {
+                db.delete(it, null, null)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
         }
     }
 
     companion object {
         const val DATABASE_NAME = "budget_meals.db"
-        const val DATABASE_VERSION = 13
+        const val DATABASE_VERSION = 14
     }
 }

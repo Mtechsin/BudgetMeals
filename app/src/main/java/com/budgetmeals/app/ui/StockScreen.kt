@@ -308,15 +308,16 @@ fun StockScreen(
                 }
             },
             confirmButton = {
-                val parsed = usageAmount.toDoubleOrNull() ?: 0.0
+                val parsed = usageAmount.asDouble()
+                val valid = parsed > 0.0 && parsed <= dateUsageTarget.remainingQuantity + 0.001
                 Button(
                     onClick = {
-                        if (parsed > 0.0) {
+                        if (valid) {
                             onLogUsageWithDate(dateUsageTarget, parsed, usageDate)
                             itemForDateUsage = null
                         }
                     },
-                    enabled = (usageAmount.toDoubleOrNull() ?: 0.0) > 0.0,
+                    enabled = valid,
                     shape = RoundedCornerShape(10.dp),
                 ) {
                     Text("Save")

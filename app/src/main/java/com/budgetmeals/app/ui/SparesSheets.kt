@@ -31,6 +31,7 @@ internal fun SparesFormSheet(snapshot: AppSnapshot, viewModel: BudgetViewModel, 
     var amount by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("other") }
+    val submission = rememberFormSubmission(onDismiss)
     val value = amount.asDouble()
     val valid = value > 0.0 && (!spend || value <= snapshot.sparesBalance)
     SheetBody(if (spend) "Spend from spares" else "Add to spares", null, onDismiss) {
@@ -87,12 +88,13 @@ internal fun SparesFormSheet(snapshot: AppSnapshot, viewModel: BudgetViewModel, 
         Spacer(Modifier.height(18.dp))
         PrimaryButton(if (spend) "Spend treat" else "Add to spares", {
             val description = reason.trim().ifBlank { if (spend) "Treat" else "Added money" }
-            if (spend) {
-                viewModel.spendFromSpares(value, description, category)
-            } else {
-                viewModel.addSpares(value, description, category)
+            submission.submit { complete ->
+                if (spend) {
+                    viewModel.spendFromSpares(value, description, category, onComplete = complete)
+                } else {
+                    viewModel.addSpares(value, description, category, complete)
+                }
             }
-            onDismiss()
-        }, enabled = valid, icon = if (spend) AppIcons.ShoppingCart else AppIcons.Savings)
+        }, enabled = valid && !submission.isSaving, icon = if (spend) AppIcons.ShoppingCart else AppIcons.Savings)
     }
 }

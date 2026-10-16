@@ -57,6 +57,7 @@ internal fun DayReviewSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
+    val submission = rememberFormSubmission(onDismiss)
     var selectedDate by remember { mutableStateOf(snapshot.today) }
     val selectableDates = remember(snapshot.today) {
         (0..6).map { snapshot.today.minusDays(it.toLong()) }
@@ -385,9 +386,9 @@ internal fun DayReviewSheet(
                         status = status,
                     )
                 }
-                viewModel.reconcileMeals(selectedDate, entries)
-                onDismiss()
+                submission.submit { complete -> viewModel.reconcileMeals(selectedDate, entries, complete) }
             },
+            enabled = plan.isNotEmpty() && !submission.isSaving,
             icon = AppIcons.FactCheck,
         )
     }

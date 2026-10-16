@@ -1,19 +1,14 @@
-@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-
 package com.budgetmeals.app.ui
 
-import com.budgetmeals.app.ui.icons.AppIcons
-
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,28 +16,34 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.budgetmeals.app.data.AppSnapshot
+import com.budgetmeals.app.data.ItemCategory
 import com.budgetmeals.app.data.ShoppingItem
 import com.budgetmeals.app.state.BudgetMath
+import com.budgetmeals.app.ui.icons.AppIcons
 import com.budgetmeals.app.ui.theme.Motion
+import com.budgetmeals.app.ui.theme.extendedColors
 
 @Composable
 fun ShoppingScreen(
@@ -53,300 +54,347 @@ fun ShoppingScreen(
     onDeleteItem: (ShoppingItem) -> Unit,
     onUndoPurchase: (ShoppingItem) -> Unit = onToggleItem,
     onBuyAgain: (ShoppingItem) -> Unit = {},
+    onAddItem: (() -> Unit)? = null,
 ) {
-    val open = remember(snapshot.shopping) { snapshot.shopping.filter { !it.isChecked } }
-    val checked = remember(snapshot.shopping) { snapshot.shopping.filter { it.isChecked } }
-    val estimated = remember(open) { open.filter { it.priceKnown }.sumOf { it.estimatedPrice } }
+    var isPurchasedHistoryExpanded by rememberSaveable { mutableStateOf(false) }
+
+    val allShopping = snapshot.shopping
+    val open = remember(allShopping) { allShopping.filter { !it.isChecked } }
+    val bought = remember(allShopping) { allShopping.filter { it.isChecked } }
+
+    val estimatedOpen = remember(open) { open.filter { it.priceKnown }.sumOf { it.estimatedPrice } }
 
     LazyColumn(
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // 1. Clean Minimal Header
         item(key = "header") {
             ScreenHeader(
                 title = "Shopping",
+                subtitle = if (open.isNotEmpty()) {
+                    val countText = "${open.size} ${if (open.size == 1) "item" else "items"}"
+                    if (estimatedOpen > 0.0) {
+                        "$countText · ${BudgetMath.money(estimatedOpen)}"
+                    } else {
+                        countText
+                    }
+                } else {
+                    "List clear"
+                },
+                action = null,
             )
         }
 
-        item(key = "overview") {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = BorderStroke(1.dp, DarkBorder),
-            ) {
-                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        color = AccentMint.copy(alpha = 0.12f),
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                        ) {
-                            Icon(
-                                AppIcons.ShoppingCart,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = AccentMintLight,
-                            )
-                            Text(
-                                open.size.toString(),
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = AccentMintLight,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            "Next shop",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextPrimary,
-                        )
-                        if (open.isEmpty()) {
-                            Text(
-                                "Nothing waiting. Nice and simple.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary,
-                            )
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "${open.size} ${if (open.size == 1) "item" else "items"} · ",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextSecondary,
-                                )
-                                Text(
-                                    "about ${BudgetMath.money(estimated)}",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = AccentMintLight,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
+        // 2. Open items or Empty State
         if (open.isEmpty()) {
-            item(key = "empty") {
+            item(key = "empty_list") {
                 EmptyState(
-                    title = "Your list is clear",
-                    message = "Tap Add item to plan your next shop. New purchases can be remembered automatically.",
+                    title = "Your shopping list is clear",
+                    message = "Nothing waiting to buy. Tap the + button below to add groceries.",
                     icon = AppIcons.ShoppingCart,
                 )
             }
         } else {
-            item(key = "to_buy_header") { SectionHeader("To buy") }
             items(open, key = { it.id }, contentType = { "shopping_item" }) { item ->
-                ShoppingRow(
+                ShoppingItemCard(
                     modifier = Modifier.animateItem(
                         fadeInSpec = Motion.FadeTween,
                         placementSpec = Motion.PlacementSpring,
                         fadeOutSpec = Motion.FadeTween,
                     ),
                     item = item,
-                    onToggle = { onToggleItem(item) },
-                    onEdit = { onEditItem(item) },
                     onBuy = { onBuyItem(item) },
+                    onEdit = { onEditItem(item) },
                     onDelete = { onDeleteItem(item) },
                 )
             }
         }
 
-        if (checked.isNotEmpty()) {
-            item(key = "done_header") { SectionHeader("Done") }
-            items(checked, key = { it.id }, contentType = { "shopping_item" }) { item ->
-                ShoppingRow(
-                    modifier = Modifier.animateItem(
-                        fadeInSpec = Motion.FadeTween,
-                        placementSpec = Motion.PlacementSpring,
-                        fadeOutSpec = Motion.FadeTween,
-                    ),
-                    item = item,
-                    onToggle = { onToggleItem(item) },
-                    onEdit = { onEditItem(item) },
-                    onBuy = { onBuyItem(item) },
-                    onDelete = { onDeleteItem(item) },
-                    onUndo = { onUndoPurchase(item) },
-                    onBuyAgain = { onBuyAgain(item) },
+        // 3. Discreet Previously Bought History
+        if (bought.isNotEmpty()) {
+            item(key = "history_header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { isPurchasedHistoryExpanded = !isPurchasedHistoryExpanded },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "Previously bought (${bought.size})",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Icon(
+                            imageVector = if (isPurchasedHistoryExpanded) AppIcons.ExpandLess else AppIcons.ExpandMore,
+                            contentDescription = if (isPurchasedHistoryExpanded) "Collapse" else "Expand",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+
+                    TextButton(
+                        onClick = { bought.forEach { onDeleteItem(it) } },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "Clear all",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                        )
+                    }
+                }
+            }
+
+            if (isPurchasedHistoryExpanded) {
+                items(bought, key = { it.id }, contentType = { "bought_item" }) { item ->
+                    BoughtItemCard(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = Motion.FadeTween,
+                            placementSpec = Motion.PlacementSpring,
+                            fadeOutSpec = Motion.FadeTween,
+                        ),
+                        item = item,
+                        onUndo = { onUndoPurchase(item) },
+                        onBuyAgain = { onBuyAgain(item) },
+                        onDelete = { onDeleteItem(item) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Clean, unambiguous shopping card.
+ * Category icon badge on the left (NO fake selection circles).
+ * Clear details in the center.
+ * Dedicated "Buy" action and delete button on the right.
+ */
+@Composable
+private fun ShoppingItemCard(
+    item: ShoppingItem,
+    onBuy: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SoftCard(
+        modifier = modifier,
+        onClick = onEdit,
+        contentPadding = 12.dp,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Category icon badge (clear visual identity, NOT a checkbox)
+            IconBadge(
+                icon = shoppingCategoryIcon(item.category),
+                tint = shoppingCategoryColor(item.category),
+                size = 40.dp,
+                iconSize = 20.dp,
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            // Main details
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = item.name,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(top = 2.dp),
+                ) {
+                    Text(
+                        text = "${item.quantity.compact()} ${item.unit}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        text = "·",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+
+                    if (!item.priceKnown) {
+                        Text(
+                            text = "Price not set",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    } else {
+                        Text(
+                            text = if (item.estimatedPrice == 0.0) "Free" else BudgetMath.money(item.estimatedPrice),
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+
+                if (item.note.isNotBlank()) {
+                    Text(
+                        text = item.note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // Unambiguous "Buy" button (opens purchase sheet to confirm price)
+            FilledTonalButton(
+                onClick = onBuy,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                    contentColor = MaterialTheme.colorScheme.primary,
+                ),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                modifier = Modifier.height(34.dp),
+            ) {
+                Text(
+                    text = "Buy",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                )
+            }
+
+            // Discreet delete button
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    AppIcons.Delete,
+                    contentDescription = "Delete item",
+                    tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f),
+                    modifier = Modifier.size(17.dp),
                 )
             }
         }
     }
 }
 
+/**
+ * Minimal card for previously bought items in the history section.
+ */
 @Composable
-private fun ShoppingRow(
+private fun BoughtItemCard(
     item: ShoppingItem,
-    onToggle: () -> Unit,
-    onEdit: () -> Unit,
-    onBuy: () -> Unit,
+    onUndo: () -> Unit,
+    onBuyAgain: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
-    onUndo: (() -> Unit)? = null,
-    onBuyAgain: (() -> Unit)? = null,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (item.isChecked) DarkSurfaceLow.copy(alpha = 0.6f) else DarkSurface,
-        ),
-        border = BorderStroke(
-            1.dp,
-            if (item.isChecked) DarkBorder.copy(alpha = 0.4f) else DarkBorder,
-        ),
+    SoftCard(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.6f),
+        borderColor = MaterialTheme.extendedColors.cardBorder.copy(alpha = 0.35f),
+        contentPadding = 10.dp,
     ) {
-        Column(Modifier.padding(start = 6.dp, top = 8.dp, end = 10.dp, bottom = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = item.isChecked,
-                    onCheckedChange = { onToggle() },
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = AccentMint,
-                        checkmarkColor = DarkBgBase,
-                        uncheckedColor = TextMuted,
-                    ),
-                )
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        item.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (item.isChecked) TextMuted else TextPrimary,
-                        textDecoration = if (item.isChecked) TextDecoration.LineThrough else null,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            "${item.quantity.compact()} ${item.unit}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (item.isChecked) TextMuted else TextSecondary,
-                        )
-                        Text(
-                            "·",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                        )
-                        if (!item.priceKnown) {
-                            Text(
-                                "Price not set",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextMuted,
-                            )
-                        } else {
-                            Text(
-                                BudgetMath.money(item.estimatedPrice),
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (item.isChecked) TextMuted else AccentMintLight,
-                            )
-                        }
-                    }
-                }
-                if (!item.isChecked) {
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedButton(
-                        onClick = onBuy,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, AccentMint.copy(alpha = 0.5f)),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = AccentMint.copy(alpha = 0.1f),
-                            contentColor = AccentMintLight,
-                        ),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                    ) {
-                        Text(
-                            "Buy",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        )
-                    }
-                }
-            }
-            if (item.note.isNotBlank()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
                 Text(
-                    item.note,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (item.isChecked) TextMuted else AccentIndigo,
-                    modifier = Modifier.padding(start = 48.dp, top = 2.dp),
+                    text = item.name,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textDecoration = TextDecoration.LineThrough,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${item.quantity.compact()} ${item.unit}" +
+                        if (item.priceKnown && item.estimatedPrice > 0.0) " · ${BudgetMath.money(item.estimatedPrice)}" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
                 )
             }
-            if (item.isChecked) {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 48.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = { onBuyAgain?.invoke() },
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, AccentMint.copy(alpha = 0.5f)),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = AccentMint.copy(alpha = 0.1f),
-                            contentColor = AccentMintLight,
-                        ),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Icon(AppIcons.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Buy again", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold))
-                    }
-                    OutlinedButton(
-                        onClick = { onUndo?.invoke() ?: onToggle() },
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, TextMuted.copy(alpha = 0.5f)),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = TextMuted.copy(alpha = 0.1f),
-                            contentColor = TextSecondary,
-                        ),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    ) {
-                        Text("Undo purchase", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold))
-                    }
-                    IconButton(onClick = onEdit) {
-                        Icon(
-                            AppIcons.Edit,
-                            contentDescription = "Edit shopping item",
-                            modifier = Modifier.size(16.dp),
-                            tint = TextSecondary,
-                        )
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(
-                            AppIcons.Delete,
-                            contentDescription = "Delete shopping item",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                        )
-                    }
-                }
-            } else {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    IconButton(onClick = onEdit) {
-                        Icon(
-                            AppIcons.Edit,
-                            contentDescription = "Edit shopping item",
-                            modifier = Modifier.size(18.dp),
-                            tint = TextSecondary,
-                        )
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(
-                            AppIcons.Delete,
-                            contentDescription = "Delete shopping item",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
-                        )
-                    }
-                }
+
+            // Quick re-buy
+            Surface(
+                onClick = onBuyAgain,
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Text(
+                    text = "Buy again",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+
+            Spacer(Modifier.width(6.dp))
+
+            // Undo (restore to shopping list)
+            Surface(
+                onClick = onUndo,
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Text(
+                    text = "Undo",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(30.dp),
+            ) {
+                Icon(
+                    AppIcons.Delete,
+                    contentDescription = "Delete item",
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
+                    modifier = Modifier.size(15.dp),
+                )
             }
         }
     }
+}
+
+/** Icon for an ItemCategory in shopping flows. */
+@Composable
+internal fun shoppingCategoryIcon(category: ItemCategory): ImageVector = when (category) {
+    ItemCategory.FOOD_STAPLE -> AppIcons.RiceBowl
+    ItemCategory.FOOD_FRESH -> AppIcons.Nutrition
+    ItemCategory.FOOD_STREET -> AppIcons.Restaurant
+    ItemCategory.SNACK -> AppIcons.Cookie
+    ItemCategory.HOUSEHOLD -> AppIcons.Home
+    ItemCategory.OTHER -> AppIcons.Category
+}
+
+/** Semantic color for an ItemCategory in shopping flows. */
+@Composable
+internal fun shoppingCategoryColor(category: ItemCategory): Color = when (category) {
+    ItemCategory.FOOD_STAPLE -> MaterialTheme.colorScheme.secondary
+    ItemCategory.FOOD_FRESH -> MaterialTheme.colorScheme.primary
+    ItemCategory.FOOD_STREET -> MaterialTheme.colorScheme.tertiary
+    ItemCategory.SNACK -> MaterialTheme.colorScheme.secondary
+    ItemCategory.HOUSEHOLD -> MaterialTheme.colorScheme.tertiary
+    ItemCategory.OTHER -> MaterialTheme.colorScheme.outline
 }

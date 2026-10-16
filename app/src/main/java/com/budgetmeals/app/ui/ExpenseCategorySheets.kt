@@ -46,21 +46,23 @@ internal fun ExpenseFormSheet(
     onDismiss: () -> Unit,
     existing: Expense? = null,
 ) {
+    val expenseId = rememberSaveable(existing?.id) { existing?.id ?: UUID.randomUUID().toString() }
     var selectedCategoryId by rememberSaveable {
         mutableStateOf(existing?.categoryId ?: snapshot.categories.firstOrNull { !it.isFood }?.id ?: snapshot.categories.firstOrNull()?.id.orEmpty())
     }
     var amount by rememberSaveable { mutableStateOf(existing?.amount?.cleanNumber() ?: "") }
     var description by rememberSaveable { mutableStateOf(existing?.description.orEmpty()) }
     var recurring by rememberSaveable { mutableStateOf(existing?.isRecurring ?: false) }
+    val submission = rememberFormSubmission(onDismiss)
     val category = snapshot.categories.firstOrNull { it.id == selectedCategoryId }
-    val valid = selectedCategoryId.isNotBlank() && amount.asDouble() > 0.0
+    val valid = category != null && amount.asDouble() > 0.0
     SheetBody(
         title = if (existing == null) "Log an expense" else "Edit expense",
         subtitle = if (existing == null) "Two taps is enough. You can edit the details later." else "Change the amount or category without starting over.",
         onClose = onDismiss,
     ) {
         FormSectionTitle("Category")
-        DropdownField(
+        if (snapshot.categories.isNotEmpty()) DropdownField(
             label = "Category",
             value = category ?: snapshot.categories.first(),
             values = snapshot.categories,
@@ -89,7 +91,7 @@ internal fun ExpenseFormSheet(
         Spacer(Modifier.height(18.dp))
         PrimaryButton(if (existing == null) "Save expense" else "Save changes", {
             val expense = Expense(
-                id = existing?.id ?: UUID.randomUUID().toString(),
+                id = expenseId,
                 categoryId = selectedCategoryId,
                 amount = amount.asDouble(),
                 date = existing?.date ?: LocalDate.now(),
@@ -97,13 +99,15 @@ internal fun ExpenseFormSheet(
                 isRecurring = recurring,
                 recurringFrequency = if (recurring) "MONTHLY" else null,
                 isCorrection = existing?.isCorrection ?: false,
+                recurringScheduleId = existing?.recurringScheduleId,
+                isBudgetTransfer = existing?.isBudgetTransfer ?: false,
             )
-            viewModel.recordExpense(expense)
-            onDismiss()
-        }, enabled = valid, icon = AppIcons.Check)
+            submission.submit { complete -> viewModel.recordExpense(expense, complete) }
+        }, enabled = valid && !submission.isSaving, icon = AppIcons.Check)
         if (existing != null) {
             OutlinedButton(
                 onClick = { viewModel.deleteExpense(existing); onDismiss() },
+                enabled = !submission.isSaving,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, ErrorBorder),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
@@ -111,7 +115,14 @@ internal fun ExpenseFormSheet(
             ) {
                 Icon(AppIcons.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text("Delete expense", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (existing.isRecurring || !existing.recurringScheduleId.isNullOrBlank()) {
+                        "Delete expense and stop repeats"
+                    } else {
+                        "Delete expense"
+                    },
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }
@@ -119,12 +130,14 @@ internal fun ExpenseFormSheet(
 
 @Composable
 internal fun CategoryFormSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
+    val categoryId = rememberSaveable { "custom_${UUID.randomUUID()}" }
     var name by remember { mutableStateOf("") }
     var budget by remember { mutableStateOf("") }
     var isFood by remember { mutableStateOf(false) }
     val icons = listOf("receipt", "transport", "health", "personal", "other")
     var icon by remember { mutableStateOf(icons.first()) }
-    val valid = name.isNotBlank() && budget.asDouble() >= 0.0
+    val submission = rememberFormSubmission(onDismiss)
+    val valid = name.isNotBlank() && budget.isNonNegativeNumber()
     SheetBody("Add a category", null, onDismiss) {
         FormSectionTitle("Category details")
         BudgetTextField(name, { name = it }, label = "Category name")
@@ -148,18 +161,20 @@ internal fun CategoryFormSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit
         }
         Spacer(Modifier.height(18.dp))
         PrimaryButton("Save category", {
-            viewModel.saveCategory(
-                ExpenseCategory(
-                    id = "custom_${UUID.randomUUID()}",
-                    name = name.trim(),
-                    icon = icon,
-                    monthlyBudget = budget.asDouble(),
-                    isFood = isFood,
-                    isCustom = true,
-                    sortOrder = 20,
-                ),
-            )
-            onDismiss()
-        }, enabled = valid, icon = AppIcons.Check)
+            submission.submit { complete ->
+                viewModel.saveCategory(
+                    ExpenseCategory(
+                        id = categoryId,
+                        name = name.trim(),
+                        icon = icon,
+                        monthlyBudget = budget.asDouble(),
+                        isFood = isFood,
+                        isCustom = true,
+                        sortOrder = 20,
+                    ),
+                    onComplete = complete,
+                )
+            }
+        }, enabled = valid && !submission.isSaving, icon = AppIcons.Check)
     }
 }

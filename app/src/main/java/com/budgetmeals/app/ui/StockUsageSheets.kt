@@ -56,13 +56,13 @@ fun StockFormSheet(
 ) {
     val existingId = existing?.id
     val newStockId = remember(existingId) { existingId ?: UUID.randomUUID().toString() }
-    var isSaving by remember(existingId) { mutableStateOf(false) }
+    val submission = rememberFormSubmission(onDismiss)
     val existingCatalogId = existing?.catalogId
     var name by remember(existingId) { mutableStateOf(existing?.name.orEmpty()) }
     var category by remember(existingId) { mutableStateOf(existing?.category ?: ItemCategory.FOOD_STAPLE) }
     var unit by remember(existingId) { mutableStateOf(existing?.unit ?: "piece") }
     var quantity by remember(existingId) { mutableStateOf(existing?.totalQuantity?.cleanNumber() ?: "") }
-    var price by remember(existingId) { mutableStateOf(existing?.totalPrice?.let { if (it == 0.0) "" else it.cleanNumber() } ?: "") }
+    var price by remember(existingId) { mutableStateOf(existing?.totalPrice?.cleanNumber() ?: "") }
     var batchType by remember(existingId) { mutableStateOf(existing?.batchType ?: BatchType.WEEKLY) }
     var usage by remember(existingId) { mutableStateOf(existing?.estimatedUsagePerDay?.cleanNumber() ?: "") }
     var notes by remember(existingId) { mutableStateOf(existing?.notes.orEmpty()) }
@@ -81,7 +81,8 @@ fun StockFormSheet(
     val parsedQuantity = quantity.asDouble()
     val parsedPrice = price.asDouble()
     val parsedUsage = usage.asDouble()
-    val valid = name.isNotBlank() && parsedQuantity > 0.0 && parsedPrice >= 0.0
+    val valid = name.isNotBlank() && parsedQuantity > 0.0 && price.isNonNegativeNumber() &&
+        usage.isNonNegativeNumber(allowBlank = true) && packageSizeInput.isNonNegativeNumber(allowBlank = true)
     val effectiveUsage = if (batchType == BatchType.SINGLE_MEAL && parsedUsage <= 0.0) parsedQuantity else parsedUsage
     val previewFood = catalogItems.firstOrNull { it.id == catalogId }
     val previewUnit = unit.trim().ifBlank { previewFood?.baseUnit ?: "piece" }
@@ -438,7 +439,7 @@ fun StockFormSheet(
             onSelected = { batchType = it },
         )
         if (batchType != BatchType.SINGLE_MEAL) {
-            val usageUnit = catalogItems.firstOrNull { it.id == catalogId }?.baseUnit ?: unit.ifBlank { "unit" }
+            val usageUnit = previewStoredUnit
             NumberField(
                 usage,
                 { usage = it },
@@ -486,8 +487,7 @@ fun StockFormSheet(
         PrimaryButton(
             text = if (existing == null) "Save purchase" else "Save changes",
             onClick = {
-                if (isSaving) return@PrimaryButton
-                isSaving = true
+                if (submission.isSaving) return@PrimaryButton
                 val food = catalogItems.firstOrNull { it.id == catalogId }
                 // Everything is stored in the food's base unit, using the batch's own package
                 // size when the user stated one. The catalog is never rewritten from here.
@@ -570,14 +570,15 @@ fun StockFormSheet(
                     packageSize = batchPackageSize,
                     conversionKnown = converted,
                 )
-                if (existing == null) {
-                    viewModel.recordPurchase(item, rememberForNextShop)
-                } else {
-                    viewModel.saveStock(item, rememberForNextShop)
+                submission.submit { complete ->
+                    if (existing == null) {
+                        viewModel.recordPurchase(item, rememberForNextShop, onComplete = complete)
+                    } else {
+                        viewModel.saveStock(item, rememberForNextShop, onComplete = complete)
+                    }
                 }
-                onDismiss()
             },
-            enabled = valid && !isSaving,
+            enabled = valid && !submission.isSaving,
             icon = AppIcons.Check,
         )
         if (existing != null) {
@@ -586,6 +587,7 @@ fun StockFormSheet(
                     viewModel.deleteStock(existing)
                     onDismiss()
                 },
+                enabled = !submission.isSaving,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, ErrorBorder),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
@@ -665,6 +667,7 @@ fun UsageFormSheet(
     var usePortionUnit by remember(item.id) { mutableStateOf(hasConversion) }
     var amount by remember(item.id, usePortionUnit) { mutableStateOf("") }
     val value = amount.asDouble()
+    val submission = rememberFormSubmission(onDismiss)
 
     val currentUnit = if (usePortionUnit) catalog?.portionUnit ?: item.unit else item.unit
     val remainingInCurrentUnit = if (usePortionUnit && perPortion != null) {
@@ -811,8 +814,7 @@ fun UsageFormSheet(
             } else {
                 value
             }
-            viewModel.logUsage(item, stockAmount, usageDate)
-            onDismiss()
-        }, enabled = valid, icon = AppIcons.Check)
+            submission.submit { complete -> viewModel.logUsage(item, stockAmount, usageDate, complete) }
+        }, enabled = valid && !submission.isSaving, icon = AppIcons.Check)
     }
 }

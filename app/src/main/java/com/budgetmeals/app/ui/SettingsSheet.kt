@@ -40,7 +40,9 @@ internal fun SettingsSheet(settings: BudgetSettings, viewModel: BudgetViewModel,
     var autoSpares by remember { mutableStateOf(settings.autoSaveSpares) }
     var reminders by remember { mutableStateOf(settings.remindersEnabled) }
     var themeMode by remember { mutableStateOf(settings.themeMode) }
-    val valid = monthly.asDouble() > 0 && daily.asDouble() > 0 && weekly.asDouble() > 0
+    val submission = rememberFormSubmission(onDismiss)
+    val valid = monthly.asDouble() > 0 && daily.asDouble() > 0 && weekly.asDouble() > 0 &&
+        kosharyPrice.isNonNegativeNumber()
     SheetBody("Settings", null, onDismiss) {
         FormSectionTitle("Appearance")
         Row(
@@ -92,21 +94,23 @@ internal fun SettingsSheet(settings: BudgetSettings, viewModel: BudgetViewModel,
         SettingSwitch("Show a spare-saving prompt", autoSpares, { autoSpares = it })
         Spacer(Modifier.height(18.dp))
         PrimaryButton("Save settings", {
-            viewModel.saveSettings(
-                settings.copy(
-                    monthlyFoodBudget = monthly.asDouble(),
-                    dailyFoodBudget = daily.asDouble(),
-                    weeklyFoodLimit = weekly.asDouble(),
-                    kosharyPrice = kosharyPrice.asDouble(),
-                    kosharyDay = kosharyDay,
-                    shoppingDay = shoppingDay,
-                    remindersEnabled = reminders,
-                    autoSaveSpares = autoSpares,
-                    themeMode = themeMode,
-                ),
-            )
-            onDismiss()
-        }, enabled = valid, icon = AppIcons.Check)
+            submission.submit { complete ->
+                viewModel.saveSettings(
+                    settings.copy(
+                        monthlyFoodBudget = monthly.asDouble(),
+                        dailyFoodBudget = daily.asDouble(),
+                        weeklyFoodLimit = weekly.asDouble(),
+                        kosharyPrice = kosharyPrice.asDouble(),
+                        kosharyDay = kosharyDay,
+                        shoppingDay = shoppingDay,
+                        remindersEnabled = reminders,
+                        autoSaveSpares = autoSpares,
+                        themeMode = themeMode,
+                    ),
+                    onComplete = complete,
+                )
+            }
+        }, enabled = valid && !submission.isSaving, icon = AppIcons.Check)
     }
 }
 

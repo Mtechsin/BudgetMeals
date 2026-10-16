@@ -110,6 +110,24 @@ object BudgetMath {
         template: MealTemplate,
         availablePortions: Map<String, Double>? = null,
     ): Double {
+        val remainingPortions = snapshot.catalogAvailablePortions.toMutableMap().apply {
+            availablePortions?.let { putAll(it) }
+        }
+        return extraPurchasesFromStock(snapshot, template, remainingPortions)
+    }
+
+    internal fun extraPurchasesForPlan(snapshot: AppSnapshot, days: List<WeeklyPlanDay>): Double {
+        val remainingPortions = snapshot.catalogAvailablePortions.toMutableMap()
+        return days.sumOf { day ->
+            day.meals.values.sumOf { extraPurchasesFromStock(snapshot, it, remainingPortions) }
+        }
+    }
+
+    private fun extraPurchasesFromStock(
+        snapshot: AppSnapshot,
+        template: MealTemplate,
+        remainingPortions: MutableMap<String, Double>,
+    ): Double {
         val components = template.components.ifEmpty {
             com.budgetmeals.app.data.MealDataCodec.legacyComponents(template.notes)
         }
@@ -117,9 +135,6 @@ object BudgetMath {
             return template.cost
         }
         var extraCash = 0.0
-        val remainingPortions = snapshot.catalogAvailablePortions.toMutableMap().apply {
-            availablePortions?.let { putAll(it) }
-        }
         for (component in components) {
             if (!component.useStock) {
                 if (component.costPerUnit <= 0.0) return Double.POSITIVE_INFINITY
@@ -329,7 +344,8 @@ object BudgetMath {
         val logs = snapshot.mealLogs
             .filter { it.date == date }
             .groupBy { it.mealType }
-            .mapValues { (_, entries) -> entries.maxByOrNull { it.actualTime } }
+            .mapValues { (_, entries) -> entries.maxBy { it.actualTime } }
+        val plansByType = plans.associateBy { it.mealType }
         var plannedCost = 0.0
         var consumedCost = 0.0
         var leftoverCost = 0.0
@@ -340,9 +356,9 @@ object BudgetMath {
         var skippedMeals = 0
         var pendingMeals = 0
 
-        plans.forEach { plan ->
-            val log = logs[plan.mealType]
-            val mealCost = log?.cost ?: plan.cost
+        (plansByType.keys + logs.keys).forEach { mealType ->
+            val log = logs[mealType]
+            val mealCost = log?.cost ?: plansByType.getValue(mealType).cost
             plannedCost += mealCost
             when {
                 log == null -> {
@@ -396,10 +412,10 @@ object BudgetMath {
 
     fun categorySpent(snapshot: AppSnapshot, categoryId: String, month: LocalDate = LocalDate.now()): Double {
         if (month.year == snapshot.today.year && month.month == snapshot.today.month) {
-            return snapshot.currentMonthExpensesByCategoryId[categoryId] ?: 0.0
+            return (snapshot.currentMonthExpensesByCategoryId[categoryId] ?: 0.0).coerceAtLeast(0.0)
         }
         return snapshot.expenses
-            .filter { it.categoryId == categoryId && it.date.year == month.year && it.date.month == month.month }
+            .filter { it.categoryId == categoryId && it.date.year == month.year && it.date.month == month.month && !it.isBudgetTransfer }
             .sumOf { it.amount }
             .coerceAtLeast(0.0)
     }
@@ -438,7 +454,8 @@ object BudgetMath {
             val latest = rows.maxWithOrNull(compareBy<Expense>({ it.date }, { it.id })) ?: return@mapNotNull null
             if (!latest.isRecurring) return@mapNotNull null
             if (rows.any { java.time.YearMonth.from(it.date) == currentYearMonth }) return@mapNotNull null
-            val targetDay = minOf(latest.date.dayOfMonth, currentYearMonth.lengthOfMonth())
+            val anchor = rows.minWithOrNull(compareBy<Expense>({ it.date }, { it.id })) ?: latest
+            val targetDay = minOf(anchor.date.dayOfMonth, currentYearMonth.lengthOfMonth())
             val dueDate = currentYearMonth.atDay(targetDay)
             if (today.isBefore(dueDate)) return@mapNotNull null
             latest.copy(
@@ -567,31 +584,34 @@ fun buildBalancedWeek(snapshot: AppSnapshot, start: LocalDate = BudgetMath.curre
 
     // Check whether complete plan fits weekly budget (settings.weeklyFoodLimit)
     if (weeklyLimit > 0.0) {
-        var currentTotalExtra = resultDays.sumOf { day ->
-            day.meals.values.sumOf { BudgetMath.extraPurchasesNeeded(snapshot, it) }
-        }
+        var currentTotalExtra = BudgetMath.extraPurchasesForPlan(snapshot, resultDays)
         if (currentTotalExtra > weeklyLimit) {
             for (dayIdx in resultDays.indices) {
                 if (currentTotalExtra <= weeklyLimit) break
                 val day = resultDays[dayIdx]
-                val updatedMeals = day.meals.toMutableMap()
                 for ((type, currentMeal) in day.meals) {
                     if (currentTotalExtra <= weeklyLimit) break
                     if (currentMeal.dayOfWeek == day.date.dayOfWeek) continue
                     val alternatives = byType[type].orEmpty().filter {
                         (it.dayOfWeek == null || it.dayOfWeek == day.date.dayOfWeek) && it.id != currentMeal.id
                     }
-                    val currentExtra = BudgetMath.extraPurchasesNeeded(snapshot, currentMeal)
                     val cheaper = alternatives
-                        .map { it to BudgetMath.extraPurchasesNeeded(snapshot, it) }
-                        .filter { it.second < currentExtra }
+                        .map { alternative ->
+                            val replacement = resultDays.toMutableList()
+                            replacement[dayIdx] = resultDays[dayIdx].copy(
+                                meals = resultDays[dayIdx].meals + (type to alternative),
+                            )
+                            alternative to BudgetMath.extraPurchasesForPlan(snapshot, replacement)
+                        }
+                        .filter { it.second < currentTotalExtra }
                         .minByOrNull { it.second }
                     if (cheaper != null) {
-                        currentTotalExtra -= (currentExtra - cheaper.second)
-                        updatedMeals[type] = cheaper.first
+                        currentTotalExtra = cheaper.second
+                        resultDays[dayIdx] = resultDays[dayIdx].copy(
+                            meals = resultDays[dayIdx].meals + (type to cheaper.first),
+                        )
                     }
                 }
-                resultDays[dayIdx] = WeeklyPlanDay(day.date, updatedMeals)
             }
         }
     }

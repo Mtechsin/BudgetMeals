@@ -17,6 +17,18 @@ class StockCatalogAvailabilityTest {
     private val today = LocalDate.of(2026, 10, 8)
 
     @Test
+    fun futurePurchasesAreNotAvailableInTodaysKitchen() {
+        val catalog = FoodCatalogItem(id = "eggs", name = "Eggs", stockUnit = "egg", portionUnit = "egg")
+        val snapshot = AppSnapshot(today = today, foodCatalog = listOf(catalog), stock = listOf(
+            StockItem(name = "Eggs", catalogId = catalog.id, unit = "egg", totalQuantity = 10.0, totalPrice = 50.0, purchaseDate = today.plusDays(1)),
+        ))
+
+        assertEquals(0.0, snapshot.availabilityFor(catalog).portions, 0.001)
+        assertTrue(snapshot.usableLots(catalog).isEmpty())
+    }
+
+
+    @Test
     fun starterTomatoesCountSixPiecesPerKilogram() {
         val tomatoes = FoodCatalogItem(
             id = "catalog_tomatoes",

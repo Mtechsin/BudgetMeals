@@ -3,6 +3,7 @@ package com.budgetmeals.app.state
 import com.budgetmeals.app.data.AppSnapshot
 import com.budgetmeals.app.data.DailyMealPlan
 import com.budgetmeals.app.data.DayClosure
+import com.budgetmeals.app.data.DynamicMealDefaults
 import com.budgetmeals.app.data.FoodCatalogItem
 import com.budgetmeals.app.data.MealComponent
 import com.budgetmeals.app.data.MealLog
@@ -18,6 +19,82 @@ import org.junit.Test
 
 class MealPlanningTest {
     private val today = LocalDate.of(2026, 10, 8)
+
+    @Test
+    fun starterRecipesUseDeclaredCatalogUnitsAndKeepIngredientPriceTotals() {
+        val expectedTotals = mapOf(
+            "fuul_combo" to 40.0,
+            "koshary_day" to 68.5,
+            "egg_dinner" to 28.0,
+            "cheese_plate" to 14.3,
+            "jam_breakfast" to 18.0,
+            "falafel_night" to 30.1,
+            "chips_treat" to 21.93,
+            "ful_sandwich" to 30.0,
+            "yogurt_breakfast" to 23.0,
+        )
+        val snapshot = AppSnapshot(today = today, foodCatalog = DynamicMealDefaults.catalog)
+        for ((id, expectedTotal) in expectedTotals) {
+            val components = DynamicMealDefaults.componentsForTemplate(id, emptyMap())
+            val template = MealTemplate(id = id, name = id, mealType = MealType.LUNCH, cost = expectedTotal, components = components)
+
+            assertEquals(expectedTotal, components.sumOf { it.estimatedCost }, 0.0001)
+            assertEquals(expectedTotal, BudgetMath.extraPurchasesNeeded(snapshot, template), 0.0001)
+        }
+    }
+
+
+    @Test
+    fun daySummaryIncludesLogsForAbsentAndClearedSlotsOnce() {
+        val snapshot = AppSnapshot(
+            today = today,
+            dayPlans = listOf(
+                DailyMealPlan("breakfast", today, MealType.BREAKFAST, null, "Breakfast", 10.0, ""),
+                DailyMealPlan("cleared-lunch", today, MealType.LUNCH, null, "", 0.0, "", isCleared = true),
+            ),
+            mealLogs = listOf(
+                MealLog(id = "breakfast-log", date = today, mealType = MealType.BREAKFAST, name = "Breakfast", cost = 12.0, actualTime = today.atTime(8, 0)),
+                MealLog(id = "old-lunch", date = today, mealType = MealType.LUNCH, name = "Lunch", cost = 20.0, actualTime = today.atTime(12, 0)),
+                MealLog(id = "latest-lunch", date = today, mealType = MealType.LUNCH, name = "Lunch", cost = 30.0, consumedCost = 20.0, status = MealStatus.PARTIAL, actualTime = today.atTime(13, 0)),
+                MealLog(id = "extra-snack", date = today, mealType = MealType.SNACK, name = "Snack", cost = 5.0, actualTime = today.atTime(15, 0)),
+                MealLog(id = "yesterday", date = today.minusDays(1), mealType = MealType.DINNER, name = "Dinner", cost = 100.0, actualTime = today.minusDays(1).atTime(20, 0)),
+            ),
+        )
+
+        val summary = BudgetMath.dayMealSummary(snapshot, today)
+
+        assertEquals(47.0, summary.plannedCost, 0.001)
+        assertEquals(37.0, summary.consumedCost, 0.001)
+        assertEquals(10.0, summary.leftoverCost, 0.001)
+        assertEquals(3, summary.consumedMeals)
+        assertEquals(1, summary.leftoverMeals)
+        assertEquals(0, summary.pendingMeals)
+    }
+
+
+    @Test
+    fun weeklyBudgetDoesNotReuseTheSameStockForEveryDay() {
+        val catalog = FoodCatalogItem(id = "egg", name = "Egg", portionUnit = "egg", stockUnit = "egg", defaultCostPerPortion = 10.0)
+        val eggMeal = MealTemplate(
+            id = "egg-meal", name = "Egg breakfast", mealType = MealType.BREAKFAST, cost = 10.0,
+            components = listOf(MealComponent(catalogId = catalog.id, name = catalog.name, unit = "egg", costPerUnit = 10.0)),
+        )
+        val cashMeal = MealTemplate(id = "cash-meal", name = "Small breakfast", mealType = MealType.BREAKFAST, cost = 5.0)
+        val snapshot = AppSnapshot(
+            today = today,
+            foodCatalog = listOf(catalog),
+            stock = listOf(StockItem(name = "Egg", catalogId = catalog.id, unit = "egg", totalQuantity = 1.0, totalPrice = 10.0, purchaseDate = today.minusDays(7))),
+            templates = listOf(eggMeal, cashMeal),
+            settings = com.budgetmeals.app.data.BudgetSettings(weeklyFoodLimit = 30.0),
+        )
+
+        val repeated = BudgetMath.mealPlanDates(today).map { WeeklyPlanDay(it, mapOf(MealType.BREAKFAST to eggMeal)) }
+        assertEquals(60.0, BudgetMath.extraPurchasesForPlan(snapshot, repeated), 0.001)
+        val week = buildBalancedWeek(snapshot, today)
+        assertEquals(30.0, BudgetMath.extraPurchasesForPlan(snapshot, week), 0.001)
+        assertEquals(1, week.count { it.meals[MealType.BREAKFAST]?.id == eggMeal.id })
+    }
+
 
     @Test
     fun persistedDayPlanDoesNotChangeWhenTemplatesChange() {

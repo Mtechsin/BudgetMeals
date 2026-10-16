@@ -46,6 +46,7 @@ internal fun AssignDayMealSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
+    val submission = rememberFormSubmission(onDismiss)
     var mode by remember {
         mutableStateOf(
             if (snapshot.templates.any { it.mealType == mealType }) "shortcuts" else "custom"
@@ -88,9 +89,9 @@ internal fun AssignDayMealSheet(
                     }
                     OutlinedButton(
                         onClick = {
-                            viewModel.assignMealToDay(date, mealType, null)
-                            onDismiss()
+                            submission.submit { complete -> viewModel.assignMealToDay(date, mealType, null, complete) }
                         },
+                        enabled = !submission.isSaving,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
                         border = BorderStroke(1.dp, ErrorBorder),
                         shape = RoundedCornerShape(12.dp),
@@ -164,8 +165,7 @@ internal fun AssignDayMealSheet(
                     templates.forEach { template ->
                         SoftCard(
                             onClick = {
-                                viewModel.assignMealToDay(date, mealType, template)
-                                onDismiss()
+                                submission.submit { complete -> viewModel.assignMealToDay(date, mealType, template, complete) }
                             },
                             contentPadding = 14.dp,
                         ) {
@@ -219,10 +219,9 @@ internal fun AssignDayMealSheet(
                             notes = customNotes.trim(),
                             isCustom = true,
                         )
-                        viewModel.assignMealToDay(date, mealType, customTemplate)
-                        onDismiss()
+                        submission.submit { complete -> viewModel.assignMealToDay(date, mealType, customTemplate, complete) }
                     },
-                    enabled = customName.isNotBlank() && customCost.asDouble() >= 0.0,
+                    enabled = customName.isNotBlank() && customCost.isNonNegativeNumber() && !submission.isSaving,
                     icon = AppIcons.Check,
                 )
             }

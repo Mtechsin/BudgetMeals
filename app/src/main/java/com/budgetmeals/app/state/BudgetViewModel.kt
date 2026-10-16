@@ -78,8 +78,9 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         item: StockItem,
         rememberForNextShop: Boolean = false,
         catalogItem: FoodCatalogItem? = null,
+        onComplete: (Boolean) -> Unit = {},
     ) {
-        mutate("Purchase saved. Added to spending${if (rememberForNextShop) " and next shop" else ""}.") {
+        mutate("Purchase saved. Added to spending${if (rememberForNextShop) " and next shop" else ""}.", onComplete) {
             repository.recordPurchase(item, rememberForNextShop, catalogItem)
         }
     }
@@ -88,8 +89,9 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         item: StockItem,
         rememberForNextShop: Boolean = false,
         catalogItem: FoodCatalogItem? = null,
+        onComplete: (Boolean) -> Unit = {},
     ) {
-        mutate("Stock item updated.") { repository.saveStock(item, rememberForNextShop, catalogItem) }
+        mutate("Stock item updated.", onComplete) { repository.saveStock(item, rememberForNextShop, catalogItem) }
     }
 
     fun deleteStock(item: StockItem) {
@@ -100,8 +102,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         mutate("${item.name} added to the next shop.") { repository.rememberStockForNextShop(item) }
     }
 
-    fun logUsage(item: StockItem, amount: Double, date: LocalDate = LocalDate.now()) {
-        mutate("Usage logged.") { repository.logUsage(item.id, amount, date) }
+    fun logUsage(item: StockItem, amount: Double, date: LocalDate = LocalDate.now(), onComplete: (Boolean) -> Unit = {}) {
+        mutate("Usage logged.", onComplete) { repository.logUsage(item.id, amount, date) }
     }
 
     fun clearSampleStock() {
@@ -112,24 +114,24 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         mutate("Pantry cleared.") { repository.clearAllStock() }
     }
 
-    fun recordExpense(expense: Expense) {
-        mutate("Expense added.") { repository.saveExpense(expense) }
+    fun recordExpense(expense: Expense, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Expense saved.", onComplete) { repository.saveExpense(expense) }
     }
 
     fun deleteExpense(expense: Expense) {
         mutate("Expense deleted.") { repository.deleteExpense(expense.id) }
     }
 
-    fun saveCategory(category: ExpenseCategory) {
-        mutate("Category saved.") { repository.saveCategory(category) }
+    fun saveCategory(category: ExpenseCategory, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Category saved.", onComplete) { repository.saveCategory(category) }
     }
 
     fun deleteCategory(category: ExpenseCategory) {
         mutate("Category deleted.") { repository.deleteCategory(category.id) }
     }
 
-    fun saveFoodCatalogItem(item: FoodCatalogItem) {
-        mutate("Food item saved.") { repository.saveFoodCatalogItem(item) }
+    fun saveFoodCatalogItem(item: FoodCatalogItem, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Food item saved.", onComplete) { repository.saveFoodCatalogItem(item) }
     }
 
     fun importFoodCatalogJson(raw: String) {
@@ -193,14 +195,15 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         mutate("Meal log updated.") { repository.recordMeal(log) }
     }
 
-    fun reconcileMeals(date: LocalDate, entries: List<MealReconciliation>) {
+    fun reconcileMeals(date: LocalDate, entries: List<MealReconciliation>, onComplete: (Boolean) -> Unit = {}) {
         if (entries.isEmpty()) {
             showMessage("There are no planned meals to close yet.")
+            onComplete(false)
             return
         }
         val consumed = entries.sumOf { it.consumedCost }
         val unused = entries.sumOf { (it.template.cost - it.consumedCost).coerceAtLeast(0.0) }
-        mutate("Day closed. ${money(consumed)} consumed, ${money(unused)} left or skipped.") {
+        mutate("Day closed. ${money(consumed)} consumed, ${money(unused)} left or skipped.", onComplete) {
             repository.reconcileMeals(date, entries)
         }
     }
@@ -209,8 +212,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         mutate("Meal log removed.") { repository.deleteMealLog(log.id) }
     }
 
-    fun saveShopping(item: ShoppingItem) {
-        mutate("Shopping list updated.") { repository.saveShopping(item) }
+    fun saveShopping(item: ShoppingItem, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Shopping list updated.", onComplete) { repository.saveShopping(item) }
     }
 
     fun undoShoppingPurchase(item: ShoppingItem) {
@@ -223,7 +226,10 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun buyAgainShoppingItem(item: ShoppingItem) {
-        mutate("${item.name} added back to shopping list.") {
+        mutateShoppingAction(
+            successMessage = "${item.name} added back to shopping list.",
+            failureMessage = "That shopping item is already on the list or was removed.",
+        ) {
             repository.buyAgainShoppingItem(item)
         }
     }
@@ -251,10 +257,11 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         mutate("Shopping item removed.") { repository.deleteShopping(item.id) }
     }
 
-    fun buyShoppingItem(item: ShoppingItem, price: Double, rememberForNextShop: Boolean = false) {
+    fun buyShoppingItem(item: ShoppingItem, price: Double, rememberForNextShop: Boolean = false, onComplete: (Boolean) -> Unit = {}) {
         mutateShoppingAction(
             successMessage = "Bought ${item.name}. Price saved to stock and spending.",
             failureMessage = "${item.name} was already bought or removed.",
+            onComplete = onComplete,
         ) {
             repository.buyShoppingItem(item, price, rememberForNextShop)
         }
@@ -265,28 +272,31 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         reason: String,
         category: String? = null,
         expenseCategoryId: String = "spares",
+        onComplete: (Boolean) -> Unit = {},
     ) {
         val safeAmount = kotlin.math.abs(amount)
-        if (safeAmount == 0.0) {
+        if (!safeAmount.isFinite() || safeAmount == 0.0) {
             showMessage("Enter an amount first.")
+            onComplete(false)
             return
         }
-        mutate("Reward spent. You earned this.") {
+        mutate("Reward spent. You earned this.", onComplete) {
             repository.spendFromSpares(safeAmount, reason, category, expenseCategoryId)
         }
     }
 
-    fun addSpares(amount: Double, reason: String, category: String? = null) {
+    fun addSpares(amount: Double, reason: String, category: String? = null, onComplete: (Boolean) -> Unit = {}) {
         val safeAmount = amount
-        if (safeAmount == 0.0) {
+        if (!safeAmount.isFinite() || safeAmount == 0.0) {
             showMessage("Enter an amount first.")
+            onComplete(false)
             return
         }
         if (safeAmount < 0.0) {
-            spendFromSpares(-safeAmount, reason, category)
+            spendFromSpares(-safeAmount, reason, category, onComplete = onComplete)
             return
         }
-        mutate("Added to spares.") {
+        mutate("Added to spares.", onComplete) {
             repository.addSpares(safeAmount, reason, category)
         }
     }
@@ -305,13 +315,14 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun saveBudgetCorrection(amount: Double, reason: String, date: LocalDate = LocalDate.now()) {
-        if (kotlin.math.abs(amount) < 0.01) {
+    fun saveBudgetCorrection(amount: Double, reason: String, date: LocalDate = LocalDate.now(), onComplete: (Boolean) -> Unit = {}) {
+        if (!amount.isFinite() || kotlin.math.abs(amount) < 0.01) {
             showMessage("The app already matches that amount.")
+            onComplete(false)
             return
         }
         val direction = if (amount > 0) "added to" else "removed from"
-        mutate("${money(kotlin.math.abs(amount))} $direction food spending.") {
+        mutate("${money(kotlin.math.abs(amount))} $direction food spending.", onComplete) {
             repository.saveBudgetCorrection(
                 Expense(
                     categoryId = "food",
@@ -328,17 +339,18 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         mutate("Budget correction removed.") { repository.deleteBudgetCorrection(expense) }
     }
 
-    fun assignMealToDay(date: LocalDate, mealType: MealType, template: MealTemplate?) {
+    fun assignMealToDay(date: LocalDate, mealType: MealType, template: MealTemplate?, onComplete: (Boolean) -> Unit = {}) {
         val message = if (template != null) {
             "${template.name} assigned to ${mealType.label.lowercase()} for ${BudgetMath.formatWeekday(date)}."
         } else {
             "${mealType.label} removed for ${BudgetMath.formatWeekday(date)}."
         }
-        launchMutation("Could not update the meal plan.") {
+        var assigned = false
+        launchMutation("Could not update the meal plan.", { success -> onComplete(success && assigned) }) {
             val current = repository.loadSnapshot()
             val resultMessage = if (current.dayClosure(date) != null) {
                 "This day is already closed. Open the day review to change it."
-            } else if (repository.assignMealToDay(date, mealType, template, current)) {
+            } else if (repository.assignMealToDay(date, mealType, template, current).also { assigned = it }) {
                 message
             } else {
                 "This day is already closed. Open the day review to change it."
@@ -377,8 +389,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun saveSettings(settings: BudgetSettings) {
-        mutate("Settings saved.") {
+    fun saveSettings(settings: BudgetSettings, onComplete: (Boolean) -> Unit = {}) {
+        mutate("Settings saved.", onComplete) {
             repository.saveSettings(settings)
             rebuildOpenTodayPlan()
         }
@@ -418,8 +430,10 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun clearMessage() {
-        _uiState.update { it.copy(message = null) }
+    fun clearMessage(displayedMessage: String? = null) {
+        _uiState.update {
+            if (displayedMessage == null || it.message == displayedMessage) it.copy(message = null) else it
+        }
     }
 
     private suspend fun rebuildOpenTodayPlan() {
@@ -452,11 +466,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     private fun mutateShoppingAction(
         successMessage: String,
         failureMessage: String,
+        onComplete: (Boolean) -> Unit = {},
         operation: suspend () -> Boolean,
     ) {
-        launchMutation("Could not update the shopping item.") {
-            val message = if (operation()) successMessage else failureMessage
-            MutationUpdate(message = message)
+        var changed = false
+        launchMutation("Could not update the shopping item.", { success -> onComplete(success && changed) }) {
+            changed = operation()
+            MutationUpdate(message = if (changed) successMessage else failureMessage)
         }
     }
 
@@ -491,7 +507,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         preserveExistingMessage: Boolean,
     ) {
         _uiState.update { current ->
-            val nextMessage = if (preserveExistingMessage) current.message ?: message else message
+            val nextMessage = if (preserveExistingMessage) message ?: current.message else message
             current.copy(snapshot = snapshot, isLoading = false, message = nextMessage)
         }
     }

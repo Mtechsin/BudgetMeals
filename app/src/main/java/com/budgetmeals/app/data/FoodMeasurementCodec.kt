@@ -217,7 +217,8 @@ object FoodMeasurementCodec {
 
         // Automatic smart inference from units if not in JSON:
         val lowerPortion = portionUnit.lowercase().trim()
-        if (lowerPortion.contains("spoon")) {
+        val stockDimension = Units.parsePackage(stockUnit)?.dimension ?: Units.dimensionOf(stockUnit)
+        if (lowerPortion.contains("spoon") && stockDimension != UnitDimension.VOLUME) {
             return FoodMeasurementType.SpoonsToGrams(gramsPerSpoon = 10.0, spoonUnitName = "spoon")
         }
         if (lowerPortion.contains("size")) {

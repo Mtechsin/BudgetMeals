@@ -74,14 +74,14 @@ internal object DynamicMealDefaults {
 
         return when (templateId) {
             "fuul_combo" -> listOf(
-                component("component_fuul", "ful", "Ful medames", 150.0, "g", 0.1),
+                component("component_fuul", "ful", "Ful medames", 1.0, "portion", 15.0),
                 component("component_falafel", "falafel", "Falafel", 2.0, "piece", 5.0),
                 component("component_bread", "bread", "Baladi bread", 1.0, "piece", 12.0),
-                component("component_pickles", "pickles", "Pickles", 1.0, "piece", 3.0),
+                component("component_pickles", "pickles", "Pickles", 1.0, "portion", 3.0),
             )
             "koshary_day" -> listOf(
                 component("component_rice", "rice", "Rice", 150.0, "g", 0.07),
-                component("component_koshari", "koshari", "Koshari", 100.0, "g", 0.25),
+                component("component_koshari", "koshari", "Koshari", 1.0, "portion", 25.0),
                 component("component_fava", "fava", "Split fava", 100.0, "g", 0.15),
                 component("component_sauce", "tomato_sauce", "Tomato sauce", 50.0, "g", 0.2),
                 component("component_onions", "onions", "Fried onions", 20.0, "g", 0.4),
@@ -107,16 +107,16 @@ internal object DynamicMealDefaults {
                 component("component_falafel_night", "falafel", "Falafel", 3.0, "piece", 5.0),
                 component("component_bread_night", "bread", "Baladi bread", 1.0, "piece", 5.0),
                 component("component_tahina", "tahina", "Tahina", 30.0, "g", 0.17),
-                component("component_salad_night", "salad", "Salad", 50.0, "g", 0.1),
+                component("component_salad_night", "salad", "Salad", 1.0, "portion", 5.0),
             )
             "chips_treat" -> listOf(
                 component("component_chips", "chips", "Chips (Medium)", 1.0, "pack", 15.0),
-                component("component_soda", "soda", "Soda", 330.0, "ml", 0.021),
+                component("component_soda", "soda", "Soda", 1.0, "can", 6.93),
             )
             "ful_sandwich" -> listOf(
-                component("component_ful_sandwich", "ful", "Ful medames", 100.0, "g", 0.1),
+                component("component_ful_sandwich", "ful", "Ful medames", 1.0, "portion", 10.0),
                 component("component_bread_sandwich", "bread", "Baladi bread", 1.0, "piece", 15.0),
-                component("component_salad_sandwich", "salad", "Salad", 50.0, "g", 0.1),
+                component("component_salad_sandwich", "salad", "Salad", 1.0, "portion", 5.0),
             )
             "yogurt_breakfast" -> listOf(
                 component("component_yogurt_breakfast", "yogurt", "Yogurt", 1.0, "cup", 10.0),
@@ -125,5 +125,22 @@ internal object DynamicMealDefaults {
             )
             else -> emptyList()
         }
+    }
+
+    /** Repairs only an unchanged shipped recipe; customized recipes and history stay intact. */
+    fun repairShippedComponents(templateId: String, existingComponents: List<MealComponent>): List<MealComponent>? {
+        val repaired = componentsForTemplate(templateId, emptyMap())
+        val legacy = repaired.map { component ->
+            when (component.id) {
+                "component_fuul" -> component.copy(quantity = 150.0, unit = "g", costPerUnit = 0.1)
+                "component_pickles" -> component.copy(quantity = 1.0, unit = "piece", costPerUnit = 3.0)
+                "component_koshari" -> component.copy(quantity = 100.0, unit = "g", costPerUnit = 0.25)
+                "component_salad_night", "component_salad_sandwich" -> component.copy(quantity = 50.0, unit = "g", costPerUnit = 0.1)
+                "component_soda" -> component.copy(quantity = 330.0, unit = "ml", costPerUnit = 0.021)
+                "component_ful_sandwich" -> component.copy(quantity = 100.0, unit = "g", costPerUnit = 0.1)
+                else -> component
+            }
+        }
+        return repaired.takeIf { it != legacy && existingComponents == legacy }
     }
 }

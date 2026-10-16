@@ -8,6 +8,15 @@ class StockUsageCodecTest {
     private val fallbackDate = LocalDate.of(2026, 10, 8)
 
     @Test
+    fun invalidAmountsCannotPoisonLearnedUsageRates() {
+        val raw = "NaN,Infinity,-2,2026-10-01:NaN,2026-10-01:1e999,2026-10-01:-1,2"
+
+        assertEquals(listOf(2.0), StockUsageCodec.decodeAmounts(raw))
+        assertEquals(listOf(DatedUsage(fallbackDate, 2.0)), StockUsageCodec.decode(raw, fallbackDate))
+    }
+
+
+    @Test
     fun decodesLegacyAmountLists() {
         val raw = "1.5,2.0"
 

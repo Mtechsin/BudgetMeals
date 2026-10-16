@@ -107,8 +107,7 @@ import com.budgetmeals.app.ui.theme.Motion
 import com.budgetmeals.app.ui.theme.extendedColors
 import java.time.Duration
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
+import java.time.ZonedDateTime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -227,18 +226,21 @@ fun BudgetMealsApp(
         }
     }
 
-    LaunchedEffect(dayReviewRequestKey, sheet) {
-        if (dayReviewRequestKey > 0L && dayReviewRequestKey != lastHandledDayReviewRequest && sheet == null) {
+    LaunchedEffect(dayReviewRequestKey, sheet, uiState.isLoading) {
+        if (!uiState.isLoading && dayReviewRequestKey > 0L && dayReviewRequestKey != lastHandledDayReviewRequest && sheet == null) {
             openSheet(AppSheet.DayReview)
             lastHandledDayReviewRequest = dayReviewRequestKey
         }
     }
 
     LaunchedEffect(uiState.snapshot.today) {
-        val nextMidnight = LocalDateTime.of(uiState.snapshot.today.plusDays(1), LocalTime.MIDNIGHT)
-        val waitMillis = Duration.between(LocalDateTime.now(), nextMidnight).toMillis() + 1_000L
-        delay(waitMillis.coerceAtLeast(1_000L))
-        viewModel.refresh()
+        while (true) {
+            val now = ZonedDateTime.now()
+            val nextMidnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone)
+            val waitMillis = Duration.between(now, nextMidnight).toMillis() + 1_000L
+            delay(waitMillis.coerceIn(1_000L, 60_000L))
+            if (LocalDate.now() != uiState.snapshot.today) viewModel.refresh()
+        }
     }
 
     PredictiveBackHandler(enabled = detailRoute != null && sheet == null) { progress ->
@@ -325,15 +327,16 @@ fun BudgetMealsApp(
     LaunchedEffect(uiState.message) {
         val message = uiState.message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
-        viewModel.clearMessage()
+        viewModel.clearMessage(message)
     }
 
     LaunchedEffect(
+        uiState.isLoading,
         uiState.snapshot.settings.remindersEnabled,
         uiState.snapshot.settings.shoppingDay,
         uiState.snapshot.settings.kosharyDay,
     ) {
-        ReminderScheduler.sync(context, uiState.snapshot.settings)
+        if (!uiState.isLoading) ReminderScheduler.sync(context, uiState.snapshot.settings)
     }
 
     LaunchedEffect(csvToShare) {
@@ -552,6 +555,7 @@ fun BudgetMealsApp(
                                         onDeleteItem = viewModel::deleteShopping,
                                         onUndoPurchase = viewModel::undoShoppingPurchase,
                                         onBuyAgain = viewModel::buyAgainShoppingItem,
+                                        onAddItem = { openSheet(AppSheet.AddShopping) },
                                     )
 
                                     MainTab.MORE -> MoreScreen(
@@ -668,6 +672,9 @@ fun BudgetMealsApp(
                                         onEditExpense = { openSheet(AppSheet.EditExpense(it)) },
                                         onDeleteExpense = viewModel::deleteExpense,
                                         onAddCategory = { openSheet(AppSheet.AddCategory) },
+                                        onEditPurchase = { openSheet(AppSheet.EditStock(it)) },
+                                        onMatchSpending = { openSheet(AppSheet.BudgetCorrection) },
+                                        onOpenSpares = { openDetail("spares") },
                                     )
 
                                     "spares" -> SparesScreen(
@@ -789,7 +796,9 @@ fun BudgetMealsApp(
                         sheet = activeSheet,
                         viewModel = viewModel,
                         snapshot = uiState.snapshot,
-                        onDismiss = closeSheet,
+                        onDismiss = {
+                            if (sheetGeneration == generationAtPresentation && sheet === activeSheet) closeSheet()
+                        },
                         onDismissGuardChanged = { guard ->
                             if (sheetGeneration == generationAtPresentation && sheet === activeSheet) {
                                 sheetDismissGuard = guard

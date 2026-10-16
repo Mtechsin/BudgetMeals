@@ -176,6 +176,51 @@ internal object DatabaseMigrations {
             // Use saved stock allocations; never consume inventory a second time during the upgrade.
             MealExpenseLedger.backfill(db)
         }
+        if (oldVersion < 14) {
+            repairShippedRecipeUnits(db)
+        }
+    }
+
+    private fun repairShippedRecipeUnits(db: SQLiteDatabase) {
+        val templates = db.query(
+            "meal_templates", arrayOf("id", "components_json"), "is_custom = 0", null, null, null, null,
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(cursor.getString(0) to cursor.getString(1))
+            }
+        }
+        templates.forEach { (id, json) ->
+            val repaired = DynamicMealDefaults.repairShippedComponents(id, MealDataCodec.decodeComponents(json))
+                ?: return@forEach
+            db.execSQL(
+                "UPDATE meal_templates SET components_json = ? WHERE id = ?",
+                arrayOf(MealDataCodec.encodeComponents(repaired), id),
+            )
+        }
+        val openPlans = db.rawQuery(
+            "SELECT plan.id, plan.template_id, plan.components_json FROM day_plans AS plan " +
+                "WHERE plan.date >= ? AND plan.is_cleared = 0 " +
+                "AND NOT EXISTS (SELECT 1 FROM day_closures AS closure WHERE closure.date = plan.date) " +
+                "AND NOT EXISTS (SELECT 1 FROM meal_logs AS log " +
+                "WHERE log.date = plan.date AND log.meal_type = plan.meal_type " +
+                "AND log.status NOT IN ('PLANNED', 'UNRECORDED'))",
+            arrayOf(LocalDate.now().toEpochDay().toString()),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(Triple(cursor.getString(0), cursor.getString(1), cursor.getString(2)))
+                }
+            }
+        }
+        openPlans.forEach { (id, templateId, json) ->
+            val repaired = templateId?.let {
+                DynamicMealDefaults.repairShippedComponents(it, MealDataCodec.decodeComponents(json))
+            } ?: return@forEach
+            db.execSQL(
+                "UPDATE day_plans SET components_json = ? WHERE id = ?",
+                arrayOf(MealDataCodec.encodeComponents(repaired), id),
+            )
+        }
     }
 
     private fun repairCurrentSchema(db: SQLiteDatabase) {
@@ -349,6 +394,26 @@ internal object DatabaseMigrations {
                         row.id,
                     ),
                 )
+                if (catalog != null && hasColumn(db, "meal_consumptions", "stock_item_id")) {
+                    val allocations = db.query(
+                        "meal_consumptions", arrayOf("id", "stock_quantity", "stock_unit"),
+                        "stock_item_id = ?", arrayOf(row.id), null, null, null,
+                    ).use { cursor ->
+                        buildList {
+                            while (cursor.moveToNext()) {
+                                add(Triple(cursor.getString(0), cursor.getDouble(1), cursor.getString(2)))
+                            }
+                        }
+                    }
+                    allocations.forEach allocationLoop@{ (allocationId, quantity, unit) ->
+                        val converted = Units.convert(quantity, unit ?: row.unit, target.unit, catalog)
+                            ?: return@allocationLoop
+                        db.execSQL(
+                            "UPDATE meal_consumptions SET stock_quantity = ?, stock_unit = ? WHERE id = ?",
+                            arrayOf(converted, target.unit, allocationId),
+                        )
+                    }
+                }
             }
         }
     }
@@ -360,9 +425,20 @@ internal object DatabaseMigrations {
         val total = Units.convert(row.totalQuantity, row.unit, baseUnit, catalog) ?: return null
         val consumed = Units.convert(row.consumedQuantity, row.unit, baseUnit, catalog) ?: return null
         val perDay = Units.convert(row.usagePerDay, row.unit, baseUnit, catalog) ?: return null
-        val history = row.usageHistory.split(',')
-            .mapNotNull { part -> part.trim().takeIf { it.isNotEmpty() }?.toDoubleOrNull() }
-            .map { amount -> Units.convert(amount, row.unit, baseUnit, catalog) ?: amount }
+        val history = row.usageHistory.split(',').mapNotNull { entry ->
+            val parts = entry.trim().split(':', limit = 3)
+            val amount = parts[if (parts.size > 1) 1 else 0].toDoubleOrNull() ?: return@mapNotNull null
+            val converted = Units.convert(amount, row.unit, baseUnit, catalog) ?: return null
+            if (parts.size == 1) converted.toString() else buildString {
+                append(parts[0])
+                append(':')
+                append(converted)
+                parts.getOrNull(2)?.let {
+                    append(':')
+                    append(it)
+                }
+            }
+        }
         return BaseRow(
             unit = baseUnit,
             totalQuantity = total,
@@ -595,10 +671,10 @@ internal object DatabaseMigrations {
                 "fuul_combo", "Fuul combo", MealType.LUNCH, 40.0, true,
                 notes = "Ful medames, falafel, baladi bread, pickles",
                 components = listOf(
-                    component("component_fuul", "catalog_ful", "Ful medames", 150.0, "g", 0.1),
+                    component("component_fuul", "catalog_ful", "Ful medames", 1.0, "portion", 15.0),
                     component("component_falafel", "catalog_falafel", "Falafel", 2.0, "piece", 5.0),
                     component("component_bread", "catalog_bread", "Baladi bread", 1.0, "piece", 12.0),
-                    component("component_pickles", "catalog_pickles", "Pickles", 1.0, "piece", 3.0),
+                    component("component_pickles", "catalog_pickles", "Pickles", 1.0, "portion", 3.0),
                 ),
             ),
             MealTemplate(
@@ -606,7 +682,7 @@ internal object DatabaseMigrations {
                 notes = "Rice, koshari, split fava, tomato sauce, fried onions",
                 components = listOf(
                     component("component_rice", "catalog_rice", "Rice", 150.0, "g", 0.07),
-                    component("component_koshari", "catalog_koshari", "Koshari", 100.0, "g", 0.25),
+                    component("component_koshari", "catalog_koshari", "Koshari", 1.0, "portion", 25.0),
                     component("component_fava", "catalog_fava", "Split fava", 100.0, "g", 0.15),
                     component("component_sauce", "catalog_tomato_sauce", "Tomato sauce", 50.0, "g", 0.2),
                     component("component_onions", "catalog_onions", "Fried onions", 20.0, "g", 0.4),
@@ -648,7 +724,7 @@ internal object DatabaseMigrations {
                     component("component_falafel_night", "catalog_falafel", "Falafel", 3.0, "piece", 5.0),
                     component("component_bread_night", "catalog_bread", "Baladi bread", 1.0, "piece", 5.0),
                     component("component_tahina", "catalog_tahina", "Tahina", 30.0, "g", 0.17),
-                    component("component_salad_night", "catalog_salad", "Salad", 50.0, "g", 0.1),
+                    component("component_salad_night", "catalog_salad", "Salad", 1.0, "portion", 5.0),
                 ),
             ),
             MealTemplate(
@@ -656,16 +732,16 @@ internal object DatabaseMigrations {
                 notes = "Chips, soda",
                 components = listOf(
                     component("component_chips", "catalog_chips", "Chips (Medium)", 1.0, "pack", 15.0),
-                    component("component_soda", "catalog_soda", "Soda", 330.0, "ml", 0.021),
+                    component("component_soda", "catalog_soda", "Soda", 1.0, "can", 6.93),
                 ),
             ),
             MealTemplate(
                 "ful_sandwich", "Ful sandwich", MealType.LUNCH, 40.0, true,
                 notes = "Ful, baladi bread, salad",
                 components = listOf(
-                    component("component_ful_sandwich", "catalog_ful", "Ful medames", 100.0, "g", 0.1),
+                    component("component_ful_sandwich", "catalog_ful", "Ful medames", 1.0, "portion", 10.0),
                     component("component_bread_sandwich", "catalog_bread", "Baladi bread", 1.0, "piece", 15.0),
-                    component("component_salad_sandwich", "catalog_salad", "Salad", 50.0, "g", 0.1),
+                    component("component_salad_sandwich", "catalog_salad", "Salad", 1.0, "portion", 5.0),
                 ),
             ),
             MealTemplate(

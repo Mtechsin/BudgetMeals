@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         NotificationHelper.createChannel(this)
+        dayReviewRequest.value = savedInstanceState?.getLong(STATE_DAY_REVIEW_REQUEST, 0L) ?: 0L
         if (savedInstanceState == null) consumeDayReviewRequest(intent)
         askForNotificationPermissionIfNeeded()
         com.budgetmeals.app.data.FoodMeasurementCodec.init(applicationContext)
@@ -70,6 +71,11 @@ class MainActivity : ComponentActivity() {
         consumeDayReviewRequest(intent)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putLong(STATE_DAY_REVIEW_REQUEST, dayReviewRequest.value)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun consumeDayReviewRequest(intent: Intent?) {
         if (intent?.getBooleanExtra(NotificationHelper.EXTRA_OPEN_DAY_REVIEW, false) == true) {
             intent.removeExtra(NotificationHelper.EXTRA_OPEN_DAY_REVIEW)
@@ -83,5 +89,9 @@ class MainActivity : ComponentActivity() {
         ) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    private companion object {
+        const val STATE_DAY_REVIEW_REQUEST = "day_review_request"
     }
 }

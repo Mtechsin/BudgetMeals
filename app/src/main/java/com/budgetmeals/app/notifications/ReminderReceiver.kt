@@ -19,12 +19,13 @@ class ReminderReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
                 val snapshot = BudgetRepository(appContext).use { it.loadSnapshot() }
+                if (!snapshot.settings.remindersEnabled) return@launch
                 val summary = BudgetMath.dayMealSummary(snapshot, snapshot.today)
                 val lowStock = snapshot.lowStock.firstOrNull()
                 val mealMessage = if (summary.isClosed) {
                     "Today's food plan is closed. You consumed ${BudgetMath.money(summary.consumedCost)}, left ${BudgetMath.money(summary.leftoverCost)}, and skipped ${BudgetMath.money(summary.skippedCost)}."
                 } else {
-                    "Review today's food plan. ${summary.pendingMeals} ${if (summary.pendingMeals == 1) "meal is" else "meals are"} still open. Unmarked meals will be counted as skipped."
+                    "Review today's food plan. ${summary.pendingMeals} ${if (summary.pendingMeals == 1) "meal is" else "meals are"} still open. Unmarked meals will remain unrecorded."
                 }
                 val message = if (lowStock != null) {
                     "$mealMessage ${lowStock.name} is also getting low."
@@ -42,7 +43,16 @@ class ReminderReceiver : BroadcastReceiver() {
             } catch (error: Exception) {
                 Log.e(TAG, "Could not prepare the meal reminder", error)
             } finally {
-                pending.finish()
+                try {
+                    val settings = BudgetRepository(appContext).use { it.readSettings() }
+                    ReminderScheduler.sync(appContext, settings)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.e(TAG, "Could not schedule the next meal reminder", error)
+                } finally {
+                    pending.finish()
+                }
             }
         }
     }

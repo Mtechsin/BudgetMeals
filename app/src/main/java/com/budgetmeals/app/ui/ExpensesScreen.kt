@@ -19,14 +19,17 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.budgetmeals.app.data.AppSnapshot
+import com.budgetmeals.app.data.BudgetRepository
 import com.budgetmeals.app.data.Expense
 import com.budgetmeals.app.data.ExpenseCategory
+import com.budgetmeals.app.data.StockItem
 import com.budgetmeals.app.state.BudgetMath
 import com.budgetmeals.app.ui.icons.AppIcons
 import com.budgetmeals.app.ui.theme.extendedColors
@@ -39,6 +42,9 @@ fun ExpensesScreen(
     onEditExpense: (Expense) -> Unit,
     onDeleteExpense: (Expense) -> Unit,
     onAddCategory: () -> Unit,
+    onEditPurchase: (StockItem) -> Unit,
+    onMatchSpending: () -> Unit,
+    onOpenSpares: () -> Unit,
 ) {
     val month = snapshot.today
     val categories = snapshot.categories
@@ -119,6 +125,7 @@ fun ExpensesScreen(
             }
         } else {
             items(monthTransactions, key = { it.id }, contentType = { "expense_row" }) { expense ->
+                val purchase = findPurchaseForExpense(snapshot.stock, expense)
                 ExpenseRow(
                     modifier = Modifier.animateItem(
                         fadeInSpec = Motion.FadeTween,
@@ -129,6 +136,10 @@ fun ExpensesScreen(
                     category = categories.firstOrNull { it.id == expense.categoryId },
                     onEdit = { onEditExpense(expense) },
                     onDelete = { onDeleteExpense(expense) },
+                    purchase = purchase,
+                    onEditPurchase = { purchase?.let(onEditPurchase) },
+                    onMatchSpending = onMatchSpending,
+                    onOpenSpares = onOpenSpares,
                 )
             }
         }
@@ -200,8 +211,13 @@ private fun ExpenseRow(
     category: ExpenseCategory?,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    purchase: StockItem?,
+    onEditPurchase: () -> Unit,
+    onMatchSpending: () -> Unit,
+    onOpenSpares: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isSparesWithdrawal = expense.id.startsWith(BudgetRepository.SPARES_EXPENSE_PREFIX)
     SoftCard(modifier = modifier, contentPadding = 12.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -226,18 +242,44 @@ private fun ExpenseRow(
                 Text(expense.description.ifBlank { category?.name ?: "Expense" }, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                 Text(
                     if (expense.isMealExpense) "${BudgetMath.formatDate(expense.date)} · Change through meal review"
+                    else if (purchase != null) "${BudgetMath.formatDate(expense.date)} · Stock purchase"
+                    else if (isSparesWithdrawal) "${BudgetMath.formatDate(expense.date)} · Spares withdrawal"
                     else "${category?.name ?: "Other"} · ${BudgetMath.formatDate(expense.date)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Text(BudgetMath.money(expense.amount), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-            if (!expense.isCorrection && !expense.isMealExpense) {
+            if (!expense.isCorrection && !expense.isMealExpense && purchase == null && !isSparesWithdrawal) {
                 IconButton(onClick = onEdit) { Icon(AppIcons.Edit, contentDescription = "Edit expense", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-            if (!expense.isMealExpense) {
-                IconButton(onClick = onDelete) { Icon(AppIcons.Delete, contentDescription = "Delete expense", tint = MaterialTheme.colorScheme.error) }
+            if (!expense.isMealExpense && purchase == null && !isSparesWithdrawal) {
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        AppIcons.Delete,
+                        contentDescription = if (expense.isRecurring || !expense.recurringScheduleId.isNullOrBlank()) {
+                            "Delete expense and stop repeats"
+                        } else {
+                            "Delete expense"
+                        },
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
+        }
+        if (purchase != null && !expense.isMealExpense) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onEditPurchase, modifier = Modifier.weight(1f)) {
+                    Text("Change through stock")
+                }
+                if (category?.isFood == true) {
+                    TextButton(onClick = onMatchSpending, modifier = Modifier.weight(1f)) {
+                        Text("Match real spending")
+                    }
+                }
+            }
+        } else if (isSparesWithdrawal) {
+            TextButton(onClick = onOpenSpares) { Text("View spares") }
         }
     }
 }

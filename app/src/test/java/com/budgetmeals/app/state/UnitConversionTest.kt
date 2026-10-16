@@ -2,6 +2,7 @@ package com.budgetmeals.app.state
 
 import com.budgetmeals.app.data.BudgetRepository
 import com.budgetmeals.app.data.FoodCatalogItem
+import com.budgetmeals.app.data.Units
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -9,6 +10,49 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UnitConversionTest {
+    @Test
+    fun hugeFiniteQuantitiesStayFiniteOrFailWithoutOverflow() {
+        val eggs = FoodCatalogItem(name = "Eggs", stockUnit = "carton (30)", portionUnit = "egg", portionsPerStockUnit = 30.0)
+
+        assertEquals(Double.MAX_VALUE, requireNotNull(Units.convert(Double.MAX_VALUE, "carton", "carton (30)", eggs)), 0.0)
+        assertEquals(Double.MAX_VALUE / 1000.0, requireNotNull(Units.convert(Double.MAX_VALUE, "g", "kg", null)), 1e290)
+        assertNull(Units.convert(Double.MAX_VALUE, "kg", "g", null))
+        assertNull(Units.convert(Double.MAX_VALUE, "carton", "egg", eggs))
+    }
+
+    @Test
+    fun genericPiecesDoNotInventMassOrVolumeConversions() {
+        val rice = FoodCatalogItem(name = "Rice", stockUnit = "kg", portionUnit = "cup", portionsPerStockUnit = 5.0)
+        val milk = FoodCatalogItem(name = "Milk", stockUnit = "bottle (1l)", portionUnit = "cup", portionsPerStockUnit = 4.0)
+
+        assertNull(Units.convert(1.0, "piece", "g", rice))
+        assertNull(Units.convert(1.0, "piece", "ml", milk))
+    }
+
+    @Test
+    fun differentlySizedPackagesCannotConvertByContainerNameAlone() {
+        assertNull(Units.convert(1.0, "jar (380g)", "jar (800g)", null))
+        assertNull(Units.convert(1.0, "jar (380g)", "jar", null))
+        assertEquals(2.0, requireNotNull(Units.convert(2.0, "jar (380g)", "jar (380g)", null)), 0.0)
+    }
+
+    @Test
+    fun unsizedPackageUsesItsStatedPhysicalPortionUnit() {
+        val jam = FoodCatalogItem(name = "Jam", stockUnit = "jar", portionUnit = "g", portionsPerStockUnit = 680.0)
+
+        assertEquals("g", jam.baseUnit)
+        assertEquals(680.0, requireNotNull(Units.convert(1.0, "jar", "g", jam)), 0.001)
+        assertEquals(0.5, requireNotNull(Units.convert(340.0, "g", "jar", jam)), 0.001)
+    }
+
+    @Test
+    fun spoonCatalogUsesTheWholeKilogramAsItsPurchaseUnit() {
+        val cheese = FoodCatalogItem(name = "Cheese", stockUnit = "kg", portionUnit = "spoon", portionsPerStockUnit = 50.0)
+
+        assertEquals(1_000.0, cheese.baseUnitsPerStockUnit, 0.001)
+        assertEquals(20.0, cheese.baseUnitsPerPortion, 0.001)
+    }
+
     @Test
     fun packageLabelsDoNotMatchThroughText() {
         assertFalse(BudgetMath.areStockUnitsMatching("g", "jar (380g)"))

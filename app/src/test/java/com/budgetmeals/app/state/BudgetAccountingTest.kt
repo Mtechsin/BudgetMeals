@@ -14,6 +14,18 @@ import org.junit.Test
 
 class BudgetAccountingTest {
     private val today = LocalDate.of(2026, 10, 8)
+
+    @Test
+    fun historicalCategorySpendingExcludesBudgetTransfers() {
+        val lastMonth = today.minusMonths(1)
+        val snapshot = AppSnapshot(today = today, expenses = listOf(
+            Expense(categoryId = "food", amount = 25.0, date = lastMonth),
+            Expense(categoryId = "food", amount = 100.0, date = lastMonth, isBudgetTransfer = true),
+        ))
+
+        assertEquals(25.0, BudgetMath.categorySpent(snapshot, "food", lastMonth), 0.001)
+    }
+
     private val foodCategory = ExpenseCategory(
         id = "food",
         name = "Food",

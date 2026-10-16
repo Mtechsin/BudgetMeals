@@ -10,6 +10,18 @@ class RecurringExpenseTest {
     private val today = LocalDate.of(2026, 10, 8)
 
     @Test
+    fun shortMonthDoesNotMoveTheOriginalMonthlyDueDay() {
+        val january = Expense(id = "rent", categoryId = "rent", amount = 1000.0, date = LocalDate.of(2026, 1, 31), isRecurring = true, recurringScheduleId = "rent")
+        val february = BudgetMath.computeRecurringExpensesToGenerate(listOf(january), LocalDate.of(2026, 2, 28)).single()
+
+        assertEquals(LocalDate.of(2026, 2, 28), february.date)
+        assertTrue(BudgetMath.computeRecurringExpensesToGenerate(listOf(january, february), LocalDate.of(2026, 3, 28)).isEmpty())
+        val march = BudgetMath.computeRecurringExpensesToGenerate(listOf(january, february), LocalDate.of(2026, 3, 31)).single()
+        assertEquals(LocalDate.of(2026, 3, 31), march.date)
+    }
+
+
+    @Test
     fun recurringExpenseGeneratedForCurrentMonthWhenMarkedRecurringInPreviousMonth() {
         val testToday = LocalDate.of(2026, 10, 5)
         val lastMonthDate = testToday.minusMonths(1).withDayOfMonth(5)

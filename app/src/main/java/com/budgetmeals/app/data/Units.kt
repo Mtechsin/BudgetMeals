@@ -44,7 +44,8 @@ data class CatalogConversion(
     val packageSize: PackageSize?,
 ) {
     val usable: Boolean
-        get() = baseUnitsPerPortion > 0.0 && baseUnit.isNotBlank()
+        get() = baseUnitsPerPortion.isFinite() && baseUnitsPerPortion > 0.0 &&
+            baseUnitsPerStockUnit.isFinite() && baseUnitsPerStockUnit > 0.0 && baseUnit.isNotBlank()
 }
 
 
@@ -169,12 +170,17 @@ object Units {
     ): CatalogConversion {
         val pkg = parsePackage(stockUnit)
         val portions = portionsPerStockUnit.takeIf { it > 0.0 && it.isFinite() }
-        val portionCountUnit = canonical(portionUnit)?.takeIf { it.dimension == UnitDimension.COUNT }?.id
+        val portionDef = canonical(portionUnit)
+        val portionCountUnit = portionDef?.takeIf { it.dimension == UnitDimension.COUNT }?.id
             ?: containerOf(portionUnit)
             ?: "unit"
 
-        if (spoonGrams != null && spoonGrams > 0.0) {
+        val bareStock = canonical(stockUnit)?.takeIf { it.dimension != UnitDimension.COUNT }
+        if (spoonGrams != null && spoonGrams.isFinite() && spoonGrams > 0.0 &&
+            pkg?.dimension != UnitDimension.VOLUME && bareStock?.dimension != UnitDimension.VOLUME
+        ) {
             val packageGrams = pkg?.takeIf { it.dimension == UnitDimension.MASS }?.sizeInBase
+                ?: bareStock?.takeIf { it.dimension == UnitDimension.MASS }?.basePerUnit
             // The stated package size is the source of truth when the catalog also gives a
             // per-package portion count that does not contradict the spoon size.
             val perPortionFromPackage = packageGrams?.let { size -> portions?.let { size / it } }
@@ -194,7 +200,6 @@ object Units {
             )
         }
 
-        val bareStock = canonical(stockUnit)?.takeIf { it.dimension != UnitDimension.COUNT }
         if (bareStock != null) {
             // The package is stated in a real unit, e.g. "kg": one package is one of it.
             val perStock = bareStock.basePerUnit
@@ -220,6 +225,16 @@ object Units {
                 baseUnitsPerPortion = portions?.let { pkg.sizeInBase / it } ?: pkg.sizeInBase,
                 packageLabel = stockUnit.takeIf { it.isNotBlank() },
                 packageSize = pkg,
+            )
+        }
+
+        if (portionDef != null && portionDef.dimension != UnitDimension.COUNT) {
+            return CatalogConversion(
+                baseUnit = if (portionDef.dimension == UnitDimension.MASS) "g" else "ml",
+                baseUnitsPerStockUnit = (portions ?: 1.0) * portionDef.basePerUnit,
+                baseUnitsPerPortion = portionDef.basePerUnit,
+                packageLabel = stockUnit.takeIf { it.isNotBlank() && canonical(it) != null },
+                packageSize = null,
             )
         }
 
@@ -268,7 +283,7 @@ object Units {
         }
         if (unit.dimension == UnitDimension.COUNT) {
             // Counts only convert through the catalog, except the generic word "piece".
-            return if (normalized == "piece") 1.0 else null
+            return if (normalized == "piece" && dimensionOf(conversion.baseUnit) == UnitDimension.COUNT) 1.0 else null
         }
         return if (unit.dimension == dimensionOf(conversion.baseUnit)) unit.basePerUnit else null
     }
@@ -276,18 +291,32 @@ object Units {
     /** Converts [quantity] from one label to another, or null when the pair is not trustworthy. */
     fun convert(quantity: Double, from: String, to: String, catalog: FoodCatalogItem?): Double? {
         if (from.isBlank() || to.isBlank()) return null
+        if (!quantity.isFinite()) return null
         if (catalog != null) {
             val fromFactor = basePerUnit(from, catalog)
             val toFactor = basePerUnit(to, catalog)
             if (fromFactor != null && toFactor != null && toFactor > 0.0) {
-                return quantity * fromFactor / toFactor
+                return scale(quantity, fromFactor, toFactor)
             }
         }
+        if (from.trim().equals(to.trim(), ignoreCase = true)) return quantity
+        // Container identity is sufficient for grouping, but package sizes must not be lost.
+        if (parsePackage(from) != null || parsePackage(to) != null) return null
         if (sameUnit(from, to)) return quantity
         val fromUnit = canonical(from) ?: return null
         val toUnit = canonical(to) ?: return null
         if (fromUnit.dimension != toUnit.dimension) return null
         if (fromUnit.dimension == UnitDimension.COUNT) return null
-        return quantity * fromUnit.basePerUnit / toUnit.basePerUnit
+        return scale(quantity, fromUnit.basePerUnit, toUnit.basePerUnit)
+    }
+
+    private fun scale(quantity: Double, fromFactor: Double, toFactor: Double): Double? {
+        val ratio = fromFactor / toFactor
+        val converted = if (ratio.isFinite() && ratio > 0.0) {
+            quantity * ratio
+        } else {
+            quantity / toFactor * fromFactor
+        }
+        return converted.takeIf { it.isFinite() }
     }
 }

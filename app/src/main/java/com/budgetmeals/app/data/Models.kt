@@ -108,7 +108,7 @@ data class FoodCatalogItem(
         get() = conversion.packageSize
 
     val hasUsableConversion: Boolean
-        get() = conversionKnown && portionsPerStockUnit > 0.0 && conversion.usable
+        get() = conversionKnown && portionsPerStockUnit.isFinite() && portionsPerStockUnit > 0.0 && conversion.usable
 
     val hasKnownPrice: Boolean
         get() = priceKnown && (defaultCostPerPortion > 0.0 || purchasePrice != null || priceOptions.any { it.price > 0.0 })
@@ -467,6 +467,7 @@ data class CatalogAvailability(
  */
 fun StockItem.isUsableFor(catalog: FoodCatalogItem, today: LocalDate): Boolean {
     if (isFinished || !conversionKnown) return false
+    if (purchaseDate.isAfter(today)) return false
     if (expiryDate != null && expiryDate.isBefore(today)) return false
     return Units.sameUnit(unit, catalog.baseUnit)
 }

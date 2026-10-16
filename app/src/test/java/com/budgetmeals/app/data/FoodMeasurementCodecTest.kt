@@ -6,6 +6,17 @@ import org.junit.Test
 
 class FoodMeasurementCodecTest {
     @Test
+    fun spoonPortionsInAVolumePackageKeepVolumeConversions() {
+        val oil = FoodCatalogItem(name = "Oil", stockUnit = "bottle (700ml)", portionUnit = "spoon", portionsPerStockUnit = 50.0)
+
+        assertEquals(FoodMeasurementType.Standard, oil.measurement)
+        assertEquals("ml", oil.baseUnit)
+        assertEquals(14.0, oil.baseUnitsPerPortion, 0.001)
+        assertEquals(700.0, requireNotNull(Units.convert(1.0, "bottle", "ml", oil)), 0.001)
+        assertEquals(2.0, requireNotNull(Units.convert(28.0, "ml", "spoon", oil)), 0.001)
+    }
+
+    @Test
     fun cheeseMeasuresInSpoonsAndConvertsToGrams() {
         val cheese = FoodCatalogItem(
             id = "cheese-item",

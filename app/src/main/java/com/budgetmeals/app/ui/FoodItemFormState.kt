@@ -283,27 +283,36 @@ class FoodItemFormState(
     }
 
     val isValid: Boolean
-        get() = name.isNotBlank() && when (measurementMode) {
-            MeasurementMode.STANDARD -> defaultCost.asDouble() >= 0.0 && portionsPerStockUnit.asDouble() > 0.0 && portionUnit.isNotBlank() && stockUnit.isNotBlank()
-            MeasurementMode.SPOONS -> defaultCost.asDouble() >= 0.0 && gramsPerSpoon.asDouble() > 0.0 && spoonUnitName.isNotBlank()
-            MeasurementMode.TIERED -> smallPrice.asDouble() >= 0.0 && mediumPrice.asDouble() >= 0.0 && largePrice.asDouble() >= 0.0
+        get() = name.isNotBlank() && purchasePrice.isNonNegativeNumber(allowBlank = true) &&
+            purchaseQuantity.asDouble() > 0.0 && when (measurementMode) {
+            MeasurementMode.STANDARD -> defaultCost.isNonNegativeNumber(allowBlank = true) &&
+                packagePrice.isNonNegativeNumber(allowBlank = true) &&
+                portionsPerStockUnit.asDouble() > 0.0 && portionUnit.isNotBlank() && stockUnit.isNotBlank()
+            MeasurementMode.SPOONS -> defaultCost.isNonNegativeNumber(allowBlank = true) &&
+                containerPrice.isNonNegativeNumber(allowBlank = true) && portionsPerStockUnit.asDouble() > 0.0 &&
+                gramsPerSpoon.asDouble() > 0.0 && spoonUnitName.isNotBlank()
+            MeasurementMode.TIERED -> smallPrice.isNonNegativeNumber(allowBlank = true) &&
+                mediumPrice.isNonNegativeNumber(allowBlank = true) && largePrice.isNonNegativeNumber(allowBlank = true)
         }
 
     fun buildCatalogItem(existingId: String?): FoodCatalogItem {
         val builtMeasurement = when (measurementMode) {
             MeasurementMode.SPOONS -> {
                 FoodMeasurementType.SpoonsToGrams(
-                    gramsPerSpoon = gramsPerSpoon.asDouble().coerceAtLeast(1.0),
+                    gramsPerSpoon = gramsPerSpoon.asDouble(),
                     spoonUnitName = spoonUnitName.trim().ifBlank { "spoon" },
                 )
             }
             MeasurementMode.TIERED -> {
                 FoodMeasurementType.TieredSizes(
-                    listOf(
-                        TieredSize("Small", smallPrice.asDouble().coerceAtLeast(0.0)),
-                        TieredSize("Medium", mediumPrice.asDouble().coerceAtLeast(0.0)),
-                        TieredSize("Large", largePrice.asDouble().coerceAtLeast(0.0)),
-                    ),
+                    initialSizes.map { size ->
+                        when {
+                            size.name.equals("Small", ignoreCase = true) -> size.copy(price = smallPrice.asDouble())
+                            size.name.equals("Medium", ignoreCase = true) -> size.copy(price = mediumPrice.asDouble())
+                            size.name.equals("Large", ignoreCase = true) -> size.copy(price = largePrice.asDouble())
+                            else -> size
+                        }
+                    },
                 )
             }
             MeasurementMode.STANDARD -> FoodMeasurementType.Standard
@@ -311,30 +320,32 @@ class FoodItemFormState(
 
         val finalPortionUnit = when (measurementMode) {
             MeasurementMode.SPOONS -> spoonUnitName.trim().ifBlank { "spoon" }
-            MeasurementMode.TIERED -> "pack"
+            MeasurementMode.TIERED -> existing?.portionUnit?.takeIf { initialMode == MeasurementMode.TIERED } ?: "pack"
             MeasurementMode.STANDARD -> portionUnit.trim().ifBlank { "piece" }
         }
 
         val finalStockUnit = when (measurementMode) {
             MeasurementMode.SPOONS -> stockUnit.trim().ifBlank { "kg" }
-            MeasurementMode.TIERED -> "pack"
+            MeasurementMode.TIERED -> existing?.stockUnit?.takeIf { initialMode == MeasurementMode.TIERED } ?: "pack"
             MeasurementMode.STANDARD -> stockUnit.trim().ifBlank { "piece" }
         }
 
         val finalPortionsPerStock = when (measurementMode) {
-            MeasurementMode.SPOONS -> portionsPerStockUnit.asDouble().coerceAtLeast(1.0)
+            MeasurementMode.SPOONS -> portionsPerStockUnit.asDouble()
             MeasurementMode.TIERED -> 1.0
             MeasurementMode.STANDARD -> portionsPerStockUnit.asDouble().coerceAtLeast(0.0001)
         }
 
         val finalDefaultCost = when (measurementMode) {
             MeasurementMode.SPOONS -> defaultCost.asDouble().coerceAtLeast(0.0)
-            MeasurementMode.TIERED -> mediumPrice.asDouble().coerceAtLeast(0.0)
+            MeasurementMode.TIERED -> (builtMeasurement as FoodMeasurementType.TieredSizes).sizes
+                .firstOrNull { it.name.equals("Medium", ignoreCase = true) }?.price
+                ?: existing?.defaultCostPerPortion ?: builtMeasurement.sizes.firstOrNull()?.price ?: 0.0
             MeasurementMode.STANDARD -> defaultCost.asDouble().coerceAtLeast(0.0)
         }
 
         val encodedNotes = FoodMeasurementCodec.encodeNotes(notes, builtMeasurement)
-        val finalPurchasePrice = purchasePrice.asDouble().takeIf { it > 0.0 }
+        val finalPurchasePrice = purchasePrice.asDoubleOrNull()?.takeIf { it >= 0.0 }
         val finalPurchaseQuantity = purchaseQuantity.asDouble().takeIf { it > 0.0 } ?: 1.0
 
         return FoodCatalogItem(
@@ -348,9 +359,17 @@ class FoodItemFormState(
             notes = encodedNotes,
             purchasePrice = finalPurchasePrice,
             purchaseQuantity = finalPurchaseQuantity,
-            purchaseUnit = finalStockUnit,
+            purchaseUnit = existing?.purchaseUnit?.takeIf { finalStockUnit == existing.stockUnit } ?: finalStockUnit,
             mealUsage = mealUsage.trim(),
-            priceKnown = finalPurchasePrice != null || finalDefaultCost > 0.0,
+            priceOptions = existing?.priceOptions.orEmpty().map { option ->
+                val tier = (builtMeasurement as? FoodMeasurementType.TieredSizes)?.sizes
+                    ?.firstOrNull { it.name.equals(option.name, ignoreCase = true) }
+                if (tier != null) option.copy(price = tier.price) else option
+            },
+            priceKnown = finalPurchasePrice != null || finalDefaultCost > 0.0 ||
+                (measurementMode != MeasurementMode.TIERED && defaultCost.isNonNegativeNumber()) ||
+                (existing?.priceKnown == true && (existing.priceOptions.isNotEmpty() ||
+                    (measurementMode == MeasurementMode.TIERED && initialMode == MeasurementMode.TIERED))),
             conversionKnown = finalPortionsPerStock > 0.0,
         )
     }

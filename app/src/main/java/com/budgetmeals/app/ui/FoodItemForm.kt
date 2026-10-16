@@ -53,6 +53,8 @@ fun FoodItemFormSheet(
     onDismiss: () -> Unit,
 ) {
     val state = rememberSaveable(existing?.id, saver = FoodItemFormState.Saver(existing)) { FoodItemFormState(existing) }
+    val itemId = rememberSaveable(existing?.id) { existing?.id ?: java.util.UUID.randomUUID().toString() }
+    val submission = rememberFormSubmission(onDismiss)
     with(state) {
         val cleanQuery = name.trim().lowercase()
         val isAutoFilled = appliedPresetName != null && name.equals(appliedPresetName, ignoreCase = true)
@@ -578,10 +580,9 @@ fun FoodItemFormSheet(
         PrimaryButton(
             if (existing == null) "Save food item" else "Save changes",
             {
-                viewModel.saveFoodCatalogItem(buildCatalogItem(existing?.id))
-                onDismiss()
+                submission.submit { complete -> viewModel.saveFoodCatalogItem(buildCatalogItem(itemId), complete) }
             },
-            enabled = isValid,
+            enabled = isValid && !submission.isSaving,
             icon = AppIcons.Check,
         )
 
@@ -591,6 +592,7 @@ fun FoodItemFormSheet(
                     viewModel.deleteFoodCatalogItem(existing)
                     onDismiss()
                 },
+                enabled = !submission.isSaving,
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, ErrorBorder),

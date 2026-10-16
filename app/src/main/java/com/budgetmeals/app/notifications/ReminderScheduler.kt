@@ -5,16 +5,14 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import com.budgetmeals.app.data.BudgetSettings
-import java.time.LocalDateTime
-import java.time.ZoneId
+import java.time.LocalTime
+import java.time.ZonedDateTime
 
 object ReminderScheduler {
     private const val REQUEST_CODE = 7301
     private const val CLOSE_REQUEST_CODE = 7302
     private const val HOUR = 22
     private const val MINUTE = 0
-    private const val CLOSE_HOUR = 23
-    private const val CLOSE_MINUTE = 59
 
     fun sync(context: Context, settings: BudgetSettings) {
         val alarmManager = context.getSystemService(AlarmManager::class.java)
@@ -34,7 +32,7 @@ object ReminderScheduler {
 
     private fun scheduleReminder(alarmManager: AlarmManager, context: Context) {
         NotificationHelper.createChannel(context)
-        scheduleRepeating(
+        scheduleReminderOccurrence(
             alarmManager = alarmManager,
             context = context,
             requestCode = REQUEST_CODE,
@@ -50,15 +48,9 @@ object ReminderScheduler {
     }
 
     private fun scheduleClose(alarmManager: AlarmManager, context: Context) {
-        val now = LocalDateTime.now()
-        var targetDate = now.toLocalDate()
-        var trigger = now.withHour(CLOSE_HOUR).withMinute(CLOSE_MINUTE).withSecond(0).withNano(0)
-        if (!trigger.isAfter(now)) {
-            targetDate = targetDate.plusDays(1)
-            trigger = trigger.plusDays(1)
-        }
+        val schedule = nextDayClose(ZonedDateTime.now())
         val intent = Intent(context, DayCloseReceiver::class.java).apply {
-            putExtra(DayCloseReceiver.EXTRA_CLOSE_DATE, targetDate.toEpochDay())
+            putExtra(DayCloseReceiver.EXTRA_CLOSE_DATE, schedule.date.toEpochDay())
         }
         val pendingIntent = PendingIntent.getBroadcast(
             context,
@@ -68,12 +60,12 @@ object ReminderScheduler {
         )
         alarmManager.setAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            trigger.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            schedule.trigger.toInstant().toEpochMilli(),
             pendingIntent,
         )
     }
 
-    private fun scheduleRepeating(
+    private fun scheduleReminderOccurrence(
         alarmManager: AlarmManager,
         context: Context,
         requestCode: Int,
@@ -88,13 +80,10 @@ object ReminderScheduler {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val now = LocalDateTime.now()
-        var trigger = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
-        if (!trigger.isAfter(now)) trigger = trigger.plusDays(1)
-        alarmManager.setInexactRepeating(
+        val trigger = nextDailyOccurrence(ZonedDateTime.now(), LocalTime.of(hour, minute))
+        alarmManager.setAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
-            trigger.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-            AlarmManager.INTERVAL_DAY,
+            trigger.toInstant().toEpochMilli(),
             pendingIntent,
         )
     }

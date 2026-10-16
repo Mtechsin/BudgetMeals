@@ -6,16 +6,16 @@ import java.time.format.DateTimeParseException
 /** Supports the legacy amount list as well as dated usage with an optional source ID. */
 internal object StockUsageCodec {
     fun decodeAmounts(raw: String): List<Double> = raw.split(',').mapNotNull { entry ->
-        entry.trim().substringAfter(':').substringBefore(':').toDoubleOrNull()
+        entry.trim().substringAfter(':').substringBefore(':').toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
     }
 
     fun decode(raw: String, defaultDate: LocalDate): List<DatedUsage> =
         raw.split(',').mapNotNull { entry ->
             val parts = entry.trim().split(':', limit = 3)
             if (parts.size == 1) {
-                parts[0].toDoubleOrNull()?.let { DatedUsage(defaultDate, it) }
+                parts[0].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }?.let { DatedUsage(defaultDate, it) }
             } else {
-                val amount = parts[1].toDoubleOrNull() ?: return@mapNotNull null
+                val amount = parts[1].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 } ?: return@mapNotNull null
                 val date = try {
                     LocalDate.parse(parts[0])
                 } catch (_: DateTimeParseException) {

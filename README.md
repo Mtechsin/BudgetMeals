@@ -6,7 +6,7 @@ BudgetMeals is a native Android app built with Kotlin and Jetpack Compose. It is
 
 - Home dashboard that starts with today's saved meal plan and the individual foods in each meal
 - End-of-day meal review for food eaten, leftovers, and skipped meals
-- Automatic catch-up that closes an untouched previous day as skipped when the app opens again
+- Automatic catch-up that closes an untouched previous day as unrecorded when the app opens again
 - Purchase calculator: price, quantity, unit, rough daily use, cost per unit, cost per day, and estimated days left
 - Every purchase can be remembered for the next shop by default
 - Shopping list with one-tap buy. Buying updates stock and food spending together
@@ -66,6 +66,14 @@ or:
 .\gradlew.bat :app:testDebugUnitTest
 ```
 
+With an Android device or emulator connected, run the isolated SQLite regression tests:
+
+```powershell
+.\gradlew.bat :app:connectedDebugAndroidTest
+```
+
+These tests use separate databases and preferences. To compile the device tests without a connected device, run `:app:assembleDebugAndroidTest`.
+
 ## Checks
 
 Build the debug APK and run Android lint:
@@ -100,9 +108,11 @@ When you mark a planned meal as eaten, the app records a food expense for the pa
 
 Saving an edit recalculates the same meal expense and its stock use; repeated saves do not add duplicate expenses. Undoing or deleting a meal removes its linked expense and restores its recorded stock use. A meal marked partial still uses the full recipe or purchased-meal cost because the ingredients were already used; leftovers do not refund cash spending. Meals with no ingredient rows, including legacy meals that cannot be matched to ingredients, use their full saved cost.
 
-At 10 PM, the reminder opens the day review. Meals left unmarked default to skipped. The app also closes the day automatically at 11:59 PM, and catches up any older open plan the next time it loads. Linked food components reduce their stock quantity when a meal is marked eaten or when the review is saved. A component without a stock link stays visible in the meal and records a shortage instead of silently changing inventory.
+At 10 PM, the reminder opens the day review. Meals left unmarked remain unrecorded until you choose their status. The app schedules the day's automatic close for the following midnight, and catches up any older open plan the next time it loads. Linked food components reduce their stock quantity when a meal is marked eaten or when the review is saved. A component without a stock link stays visible in the meal and records a shortage instead of silently changing inventory.
 
 If spending was missed or entered twice, use **Match real spending** on Home or in More. The correction stays in the expense ledger and can be removed later.
+
+Purchase expenses stay linked to their stock records. Use **Change through stock** for stock details or **Match real spending** for a food spending correction. Deleting a recurring expense also stops its schedule; earlier payments remain in the ledger.
 
 ## Food catalog and stock links
 

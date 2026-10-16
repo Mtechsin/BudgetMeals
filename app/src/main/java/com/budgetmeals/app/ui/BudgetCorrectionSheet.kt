@@ -52,7 +52,8 @@ internal fun BudgetCorrectionSheet(
     var missedAmount by remember { mutableStateOf("") }
     var daysAgo by remember { mutableIntStateOf(0) }
     var reason by remember { mutableStateOf("") }
-    val recorded = snapshot.foodSpentThisMonth
+    val submission = rememberFormSubmission(onDismiss)
+    val recorded = snapshot.recordedFoodSpentThisMonth
     val amountValue = actual.asDouble()
     val missedValue = missedAmount.asDouble()
     val difference = if (mode == BudgetCorrectionMode.MATCH_MONTH) {
@@ -61,7 +62,7 @@ internal fun BudgetCorrectionSheet(
         missedValue
     }
     val valid = if (mode == BudgetCorrectionMode.MATCH_MONTH) {
-        actual.isNotBlank() && amountValue >= 0.0 && abs(difference) >= 0.01
+        actual.isNonNegativeNumber() && abs(difference) >= 0.01 && difference.isFinite()
     } else {
         missedValue > 0.0
     }
@@ -177,10 +178,11 @@ internal fun BudgetCorrectionSheet(
                 } else {
                     "Added forgotten food spending"
                 }
-                viewModel.saveBudgetCorrection(difference, reason.ifBlank { defaultReason }, correctionDate)
-                onDismiss()
+                submission.submit { complete ->
+                    viewModel.saveBudgetCorrection(difference, reason.ifBlank { defaultReason }, correctionDate, complete)
+                }
             },
-            enabled = valid,
+            enabled = valid && !submission.isSaving,
             icon = AppIcons.Check,
         )
 

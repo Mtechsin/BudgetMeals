@@ -149,6 +149,20 @@ Do not change ids for items that already exist. Do not wrap JSON in markdown."""
     private fun decodeItem(json: JSONObject, index: Int): FoodCatalogItem {
         val name = json.optString("name").trim()
         require(name.isNotBlank()) { "Item ${index + 1} is missing a name." }
+        val positiveFields = listOf(
+            "purchaseQuantity", "purchase_quantity", "quantity", "portionsPerPurchaseUnit",
+            "portions_per_purchase_unit", "portionsPerStockUnit", "portions_per_stock_unit",
+        )
+        val nonNegativeFields = listOf(
+            "defaultCostPerPortion", "default_cost_per_portion", "cost_per_portion", "purchasePrice", "purchase_price",
+        )
+        for (field in positiveFields + nonNegativeFields) {
+            if (!json.has(field) || json.isNull(field)) continue
+            val value = json.optDouble(field, Double.NaN)
+            require(value.isFinite() && if (field in positiveFields) value > 0.0 else value >= 0.0) {
+                "Item '$name' has an invalid $field."
+            }
+        }
         val category = json.optString("category")
             .takeIf { it.isNotBlank() }
             ?.let { value ->
@@ -186,20 +200,23 @@ Do not change ids for items that already exist. Do not wrap JSON in markdown."""
         val explicitDefaultCost = json.optionalNonNegativeDouble("defaultCostPerPortion")
             ?: json.optionalNonNegativeDouble("default_cost_per_portion")
             ?: json.optionalNonNegativeDouble("cost_per_portion")
-        val defaultCost = explicitDefaultCost ?: 0.0
         val explicitPurchasePrice = json.optionalNonNegativeDouble("purchasePrice")
             ?: json.optionalNonNegativeDouble("purchase_price")
-        val portionsForCost = (purchaseQuantity * portionsPerPurchaseUnit).coerceAtLeast(0.0001)
+        val portionsForCost = purchaseQuantity * portionsPerPurchaseUnit
+        require(portionsForCost.isFinite() && portionsForCost > 0.0) { "Item '$name' has an invalid total portion quantity." }
         val derivedDefaultCost = explicitPurchasePrice?.div(portionsForCost) ?: 0.0
-        val priceKnown = json.optBoolean("priceKnown", json.optBoolean("price_known", defaultCost > 0.0 || explicitPurchasePrice != null))
         val conversionKnown = json.optBoolean("conversionKnown", json.optBoolean("conversion_known", true))
         val priceOptions = decodePriceOptions(json.optJSONArray("priceOptions") ?: json.optJSONArray("prices"), name)
+        val measurement = decodeMeasurement(json.optJSONObject("measurement"), name)
         val effectiveDefaultCost = when {
             explicitDefaultCost != null -> explicitDefaultCost
             priceOptions.isNotEmpty() -> priceOptions.map { it.price }.average()
+            explicitPurchasePrice != null -> derivedDefaultCost
+            measurement is FoodMeasurementType.TieredSizes -> measurement.sizes.map { it.price }.average()
             else -> derivedDefaultCost
         }
-        val measurement = decodeMeasurement(json.optJSONObject("measurement"), name)
+        require(effectiveDefaultCost.isFinite()) { "Item '$name' has an invalid portion price." }
+        val priceKnown = json.optBoolean("priceKnown", json.optBoolean("price_known", effectiveDefaultCost > 0.0 || explicitPurchasePrice != null))
         val userNotes = json.optString("notes").trim()
         return FoodCatalogItem(
             id = json.optString("id").trim().ifBlank { UUID.randomUUID().toString() },
