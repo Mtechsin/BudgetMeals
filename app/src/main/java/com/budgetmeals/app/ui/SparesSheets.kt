@@ -15,7 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -27,14 +27,16 @@ import com.budgetmeals.app.ui.icons.AppIcons
 
 @Composable
 internal fun SparesFormSheet(snapshot: AppSnapshot, viewModel: BudgetViewModel, onDismiss: () -> Unit) {
-    var spend by remember { mutableStateOf(false) }
-    var amount by remember { mutableStateOf("") }
-    var reason by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("other") }
-    val submission = rememberFormSubmission(onDismiss)
+    val editorIdentity = "spares"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    var spend by rememberSaveable(key = "${draftKey}_spend") { mutableStateOf(false) }
+    var amount by rememberSaveable(key = "${draftKey}_amount") { mutableStateOf("") }
+    var reason by rememberSaveable(key = "${draftKey}_reason") { mutableStateOf("") }
+    var category by rememberSaveable(key = "${draftKey}_category") { mutableStateOf("other") }
     val value = amount.asDouble()
     val valid = value > 0.0 && (!spend || value <= snapshot.sparesBalance)
-    SheetBody(if (spend) "Spend from spares" else "Add to spares", null, onDismiss) {
+    SheetBody(if (spend) "Spend from spares" else "Add to spares", null, draft.dismiss) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(vertical = 4.dp),
@@ -88,13 +90,13 @@ internal fun SparesFormSheet(snapshot: AppSnapshot, viewModel: BudgetViewModel, 
         Spacer(Modifier.height(18.dp))
         PrimaryButton(if (spend) "Spend treat" else "Add to spares", {
             val description = reason.trim().ifBlank { if (spend) "Treat" else "Added money" }
-            submission.submit { complete ->
+            draft.submission.submit { complete ->
                 if (spend) {
                     viewModel.spendFromSpares(value, description, category, onComplete = complete)
                 } else {
                     viewModel.addSpares(value, description, category, complete)
                 }
             }
-        }, enabled = valid && !submission.isSaving, icon = if (spend) AppIcons.ShoppingCart else AppIcons.Savings)
+        }, enabled = valid && !draft.submission.isSaving, icon = if (spend) AppIcons.ShoppingCart else AppIcons.Savings)
     }
 }

@@ -9,6 +9,12 @@ internal object MealSpending {
     fun expenseId(logId: String): String = "$EXPENSE_PREFIX$logId"
 
     fun cashCost(log: MealLog, stockCoverage: Map<String, MealStockCoverage>): Double {
+        if (log.cashPaid != null) {
+            val paid = log.cashPaid.coerceAtLeast(0.0)
+            // Actual money paid out of pocket remains spent even if eating status changes (e.g. skipped)
+            if (paid > 0.0) return paid
+            return 0.0
+        }
         if (!log.isConsumed || !log.cost.isFinite() || log.cost <= 0.0) return 0.0
         val components = log.components.filter { it.quantity.isFinite() && it.quantity > 0.0 }
         if (components.isEmpty()) return log.cost

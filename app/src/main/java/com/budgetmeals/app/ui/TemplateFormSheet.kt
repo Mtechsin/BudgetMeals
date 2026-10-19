@@ -76,6 +76,7 @@ import com.budgetmeals.app.data.MealType
 import com.budgetmeals.app.state.BudgetMath
 import com.budgetmeals.app.state.BudgetViewModel
 import com.budgetmeals.app.state.MealBuilderDraft
+import com.budgetmeals.app.data.MealMarker
 import com.budgetmeals.app.ui.icons.AppIcons
 import java.time.DayOfWeek
 import java.util.UUID
@@ -84,6 +85,9 @@ private enum class MealPriceMode { INGREDIENTS, MANUAL }
 
 private val mealTypeSaver = Saver<MealType, String>(
     save = { it.name }, restore = { runCatching { MealType.valueOf(it) }.getOrDefault(MealType.LUNCH) },
+)
+private val markerSaver = Saver<MealMarker, String>(
+    save = { it.name }, restore = { runCatching { MealMarker.valueOf(it) }.getOrDefault(MealMarker.UNMARKED) },
 )
 private val daySaver = Saver<DayOfWeek?, String>(
     save = { it?.name.orEmpty() }, restore = { it.takeIf(String::isNotBlank)?.let { value -> runCatching { DayOfWeek.valueOf(value) }.getOrNull() } },
@@ -116,6 +120,7 @@ internal fun TemplateFormSheet(
 
     var name by rememberSaveable(existing?.id) { mutableStateOf(existing?.name ?: draft.name) }
     var type by rememberSaveable(existing?.id, stateSaver = mealTypeSaver) { mutableStateOf(existing?.mealType ?: draft.mealType) }
+    var marker by rememberSaveable(existing?.id, stateSaver = markerSaver) { mutableStateOf(existing?.marker ?: MealMarker.UNMARKED) }
     var manualCost by rememberSaveable(existing?.id) {
         mutableStateOf(existing?.let { if (it.cost == 0.0) "" else it.cost.cleanNumber() } ?: draft.cost)
     }
@@ -164,12 +169,12 @@ internal fun TemplateFormSheet(
         hasValidIngredients && invalidComponents.isEmpty() && !isSaving && !isDeleting
     val editing = existing != null
     val hasUnsavedChanges = if (existing != null) {
-        name != existing.name || type != existing.mealType || recurring != existing.isRecurring || notes != existing.notes || day != existing.dayOfWeek ||
+        name != existing.name || type != existing.mealType || marker != existing.marker || recurring != existing.isRecurring || notes != existing.notes || day != existing.dayOfWeek ||
             components != initialComponents || invalidComponents.isNotEmpty() || pricingMode != (if (existingHasManualTotal) MealPriceMode.MANUAL else MealPriceMode.INGREDIENTS) ||
             (pricingMode == MealPriceMode.MANUAL && (parsedManualPrice ?: 0.0) != existing.cost)
     } else {
         name.isNotBlank() || components.isNotEmpty() || invalidComponents.isNotEmpty() || manualCost.isNotBlank() || notes.isNotBlank() || type != MealType.LUNCH ||
-            !recurring || day != null || pricingMode != (if (newHasManualDraft) MealPriceMode.MANUAL else MealPriceMode.INGREDIENTS)
+            marker != MealMarker.UNMARKED || !recurring || day != null || pricingMode != (if (newHasManualDraft) MealPriceMode.MANUAL else MealPriceMode.INGREDIENTS)
     }
 
     fun requestDismiss() {
@@ -244,6 +249,7 @@ internal fun TemplateFormSheet(
             id = newId, name = name.trim(), mealType = type, cost = effectivePrice,
             isRecurring = recurring, dayOfWeek = day, notes = notes.trim(), isCustom = existing?.isCustom ?: true,
             components = components,
+            marker = marker,
         )
         viewModel.saveTemplate(saved) { success ->
             isSaving = false
@@ -281,6 +287,23 @@ internal fun TemplateFormSheet(
                             selected = type == mealType, onClick = { type = mealType }, enabled = editingEnabled,
                             label = { Text(mealType.label) },
                             leadingIcon = if (type == mealType) ({ Icon(AppIcons.Check, null, Modifier.size(16.dp)) }) else null,
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentMint.copy(alpha = .16f), selectedLabelColor = AccentMintLight),
+                        )
+                    }
+                }
+                Text("Meal marker", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    MealMarker.entries.forEach { m ->
+                        FilterChip(
+                            selected = marker == m, onClick = { marker = m }, enabled = editingEnabled,
+                            label = {
+                                Text(when (m) {
+                                    MealMarker.UNMARKED -> "Unmarked"
+                                    MealMarker.ESSENTIAL -> "Essential (everyday)"
+                                    MealMarker.NICE -> "Nice (treat)"
+                                })
+                            },
+                            leadingIcon = if (marker == m) ({ Icon(AppIcons.Check, null, Modifier.size(16.dp)) }) else null,
                             colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentMint.copy(alpha = .16f), selectedLabelColor = AccentMintLight),
                         )
                     }

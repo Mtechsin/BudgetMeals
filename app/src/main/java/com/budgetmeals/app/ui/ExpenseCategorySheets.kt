@@ -46,20 +46,22 @@ internal fun ExpenseFormSheet(
     onDismiss: () -> Unit,
     existing: Expense? = null,
 ) {
-    val expenseId = rememberSaveable(existing?.id) { existing?.id ?: UUID.randomUUID().toString() }
-    var selectedCategoryId by rememberSaveable {
+    val editorIdentity = "expense_${existing?.id ?: "new"}"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    val expenseId = rememberSaveable(existing?.id, key = "${draftKey}_id") { existing?.id ?: UUID.randomUUID().toString() }
+    var selectedCategoryId by rememberSaveable(key = "${draftKey}_cat") {
         mutableStateOf(existing?.categoryId ?: snapshot.categories.firstOrNull { !it.isFood }?.id ?: snapshot.categories.firstOrNull()?.id.orEmpty())
     }
-    var amount by rememberSaveable { mutableStateOf(existing?.amount?.cleanNumber() ?: "") }
-    var description by rememberSaveable { mutableStateOf(existing?.description.orEmpty()) }
-    var recurring by rememberSaveable { mutableStateOf(existing?.isRecurring ?: false) }
-    val submission = rememberFormSubmission(onDismiss)
+    var amount by rememberSaveable(key = "${draftKey}_amount") { mutableStateOf(existing?.amount?.cleanNumber() ?: "") }
+    var description by rememberSaveable(key = "${draftKey}_desc") { mutableStateOf(existing?.description.orEmpty()) }
+    var recurring by rememberSaveable(key = "${draftKey}_recurring") { mutableStateOf(existing?.isRecurring ?: false) }
     val category = snapshot.categories.firstOrNull { it.id == selectedCategoryId }
     val valid = category != null && amount.asDouble() > 0.0
     SheetBody(
         title = if (existing == null) "Log an expense" else "Edit expense",
         subtitle = if (existing == null) "Two taps is enough. You can edit the details later." else "Change the amount or category without starting over.",
-        onClose = onDismiss,
+        onClose = draft.dismiss,
     ) {
         FormSectionTitle("Category")
         if (snapshot.categories.isNotEmpty()) DropdownField(
@@ -102,12 +104,16 @@ internal fun ExpenseFormSheet(
                 recurringScheduleId = existing?.recurringScheduleId,
                 isBudgetTransfer = existing?.isBudgetTransfer ?: false,
             )
-            submission.submit { complete -> viewModel.recordExpense(expense, complete) }
-        }, enabled = valid && !submission.isSaving, icon = AppIcons.Check)
+            draft.submission.submit { complete ->
+                viewModel.recordExpense(expense) { success ->
+                    complete(success)
+                }
+            }
+        }, enabled = valid && !draft.submission.isSaving, icon = AppIcons.Check)
         if (existing != null) {
             OutlinedButton(
-                onClick = { viewModel.deleteExpense(existing); onDismiss() },
-                enabled = !submission.isSaving,
+                onClick = { viewModel.deleteExpense(existing); draft.dismiss() },
+                enabled = !draft.submission.isSaving,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, ErrorBorder),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
@@ -130,15 +136,17 @@ internal fun ExpenseFormSheet(
 
 @Composable
 internal fun CategoryFormSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit) {
-    val categoryId = rememberSaveable { "custom_${UUID.randomUUID()}" }
-    var name by remember { mutableStateOf("") }
-    var budget by remember { mutableStateOf("") }
-    var isFood by remember { mutableStateOf(false) }
+    val editorIdentity = "category"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    val categoryId = rememberSaveable(key = "${draftKey}_id") { "custom_${UUID.randomUUID()}" }
+    var name by rememberSaveable(key = "${draftKey}_name") { mutableStateOf("") }
+    var budget by rememberSaveable(key = "${draftKey}_budget") { mutableStateOf("") }
+    var isFood by rememberSaveable(key = "${draftKey}_isFood") { mutableStateOf(false) }
     val icons = listOf("receipt", "transport", "health", "personal", "other")
-    var icon by remember { mutableStateOf(icons.first()) }
-    val submission = rememberFormSubmission(onDismiss)
+    var icon by rememberSaveable(key = "${draftKey}_icon") { mutableStateOf(icons.first()) }
     val valid = name.isNotBlank() && budget.isNonNegativeNumber()
-    SheetBody("Add a category", null, onDismiss) {
+    SheetBody("Add a category", null, draft.dismiss) {
         FormSectionTitle("Category details")
         BudgetTextField(name, { name = it }, label = "Category name")
         NumberField(budget, { budget = it }, "Monthly budget", Modifier.padding(top = 12.dp), prefix = "EGP ")
@@ -161,7 +169,7 @@ internal fun CategoryFormSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit
         }
         Spacer(Modifier.height(18.dp))
         PrimaryButton("Save category", {
-            submission.submit { complete ->
+            draft.submission.submit { complete ->
                 viewModel.saveCategory(
                     ExpenseCategory(
                         id = categoryId,
@@ -175,6 +183,6 @@ internal fun CategoryFormSheet(viewModel: BudgetViewModel, onDismiss: () -> Unit
                     onComplete = complete,
                 )
             }
-        }, enabled = valid && !submission.isSaving, icon = AppIcons.Check)
+        }, enabled = valid && !draft.submission.isSaving, icon = AppIcons.Check)
     }
 }

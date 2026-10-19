@@ -10,10 +10,10 @@ internal object BudgetCsvCodec {
             appendLine("Exported,$exportedOn")
             appendLine()
             appendLine("Expenses")
-            appendLine("Date,Category,Amount EGP,Description,Recurring,Correction")
+            appendLine("Date,Category,Amount EGP,Description,Recurring,Correction,Classification")
             snapshot.expenses.sortedBy { it.date }.forEach { expense ->
                 val category = snapshot.categories.firstOrNull { it.id == expense.categoryId }?.name ?: "Other"
-                appendLine("${expense.date},${csvEscape(category)},${money(expense.amount)},${csvEscape(expense.description)},${expense.isRecurring},${expense.isCorrection}")
+                appendLine("${expense.date},${csvEscape(category)},${money(expense.amount)},${csvEscape(expense.description)},${expense.isRecurring},${expense.isCorrection},${csvEscape(expense.foodClassification.orEmpty())}")
             }
             appendLine()
             appendLine("Stock")

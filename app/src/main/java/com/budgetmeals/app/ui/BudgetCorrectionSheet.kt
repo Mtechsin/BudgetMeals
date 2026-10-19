@@ -22,7 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +36,7 @@ import com.budgetmeals.app.ui.icons.AppIcons
 import java.time.LocalDate
 import kotlin.math.abs
 
-private enum class BudgetCorrectionMode {
+internal enum class BudgetCorrectionMode {
     MATCH_MONTH,
     MISSED_SPENDING,
 }
@@ -47,12 +47,16 @@ internal fun BudgetCorrectionSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
-    var mode by remember { mutableStateOf(BudgetCorrectionMode.MATCH_MONTH) }
-    var actual by remember { mutableStateOf("") }
-    var missedAmount by remember { mutableStateOf("") }
-    var daysAgo by remember { mutableIntStateOf(0) }
-    var reason by remember { mutableStateOf("") }
-    val submission = rememberFormSubmission(onDismiss)
+    val editorIdentity = "budget_correction"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    var mode by rememberSaveable(key = "${draftKey}_mode", stateSaver = enumSaver<BudgetCorrectionMode>()) {
+        mutableStateOf(BudgetCorrectionMode.MATCH_MONTH)
+    }
+    var actual by rememberSaveable(key = "${draftKey}_actual") { mutableStateOf("") }
+    var missedAmount by rememberSaveable(key = "${draftKey}_missed") { mutableStateOf("") }
+    var daysAgo by rememberSaveable(key = "${draftKey}_daysAgo") { mutableStateOf(0) }
+    var reason by rememberSaveable(key = "${draftKey}_reason") { mutableStateOf("") }
     val recorded = snapshot.recordedFoodSpentThisMonth
     val amountValue = actual.asDouble()
     val missedValue = missedAmount.asDouble()
@@ -77,7 +81,7 @@ internal fun BudgetCorrectionSheet(
 
     SheetBody(
         title = "Match real spending",
-        onClose = onDismiss,
+        onClose = draft.dismiss,
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -178,11 +182,13 @@ internal fun BudgetCorrectionSheet(
                 } else {
                     "Added forgotten food spending"
                 }
-                submission.submit { complete ->
-                    viewModel.saveBudgetCorrection(difference, reason.ifBlank { defaultReason }, correctionDate, complete)
+                draft.submission.submit { complete ->
+                    viewModel.saveBudgetCorrection(difference, reason.ifBlank { defaultReason }, correctionDate) { success ->
+                        complete(success)
+                    }
                 }
             },
-            enabled = valid && !submission.isSaving,
+            enabled = valid && !draft.submission.isSaving,
             icon = AppIcons.Check,
         )
 

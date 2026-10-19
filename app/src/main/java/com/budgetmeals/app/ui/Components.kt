@@ -724,6 +724,8 @@ fun BudgetTextField(
     prefix: String? = null,
     trailingIcon: (@Composable () -> Unit)? = null,
     enabled: Boolean = true,
+    isError: Boolean = false,
+    supportingText: @Composable (() -> Unit)? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -732,6 +734,8 @@ fun BudgetTextField(
         placeholder = placeholder?.let { { Text(it, color = TextMuted) } },
         prefix = prefix?.let { { Text(it) } },
         trailingIcon = trailingIcon,
+        isError = isError,
+        supportingText = supportingText,
         keyboardOptions = keyboardOptions,
         singleLine = singleLine,
         enabled = enabled,
@@ -751,6 +755,8 @@ fun NumberField(
     prefix: String? = null,
     decimal: Boolean = true,
     enabled: Boolean = true,
+    isError: Boolean = false,
+    supportingText: @Composable (() -> Unit)? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -758,6 +764,8 @@ fun NumberField(
         label = { Text(label) },
         placeholder = placeholder?.let { { Text(it, color = TextMuted) } },
         prefix = prefix?.let { { Text(it) } },
+        isError = isError,
+        supportingText = supportingText,
         keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number),
         singleLine = true,
         enabled = enabled,

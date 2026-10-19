@@ -43,6 +43,7 @@ internal object MealExpenseLedger {
             put("is_recurring", 0)
             put("is_correction", 0)
             put("is_budget_transfer", 0)
+            put("food_classification", "meal")
         }, SQLiteDatabase.CONFLICT_REPLACE)
         check(inserted != -1L) { "Could not record meal spending." }
     }

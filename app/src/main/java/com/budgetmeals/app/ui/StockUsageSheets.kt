@@ -1,9 +1,12 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.budgetmeals.app.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,28 +58,29 @@ fun StockFormSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
-    val existingId = existing?.id
-    val newStockId = remember(existingId) { existingId ?: UUID.randomUUID().toString() }
-    val submission = rememberFormSubmission(onDismiss)
+    val editorIdentity = "purchase_${existing?.id ?: "new"}"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    val newStockId = rememberSaveable(key = "${draftKey}_stockId") { existing?.id ?: UUID.randomUUID().toString() }
     val existingCatalogId = existing?.catalogId
-    var name by remember(existingId) { mutableStateOf(existing?.name.orEmpty()) }
-    var category by remember(existingId) { mutableStateOf(existing?.category ?: ItemCategory.FOOD_STAPLE) }
-    var unit by remember(existingId) { mutableStateOf(existing?.unit ?: "piece") }
-    var quantity by remember(existingId) { mutableStateOf(existing?.totalQuantity?.cleanNumber() ?: "") }
-    var price by remember(existingId) { mutableStateOf(existing?.totalPrice?.cleanNumber() ?: "") }
-    var batchType by remember(existingId) { mutableStateOf(existing?.batchType ?: BatchType.WEEKLY) }
-    var usage by remember(existingId) { mutableStateOf(existing?.estimatedUsagePerDay?.cleanNumber() ?: "") }
-    var notes by remember(existingId) { mutableStateOf(existing?.notes.orEmpty()) }
-    var catalogId by remember(existingId) { mutableStateOf(existingCatalogId) }
-    var catalogItems by remember(existingId) { mutableStateOf(snapshot.foodCatalog) }
-    var catalogQuery by remember(existingId) { mutableStateOf("") }
-    var portionUnit by remember(existingId) {
+    var name by rememberSaveable(key = "${draftKey}_name") { mutableStateOf(existing?.name.orEmpty()) }
+    var category by rememberSaveable(key = "${draftKey}_category", stateSaver = enumSaver<ItemCategory>()) { mutableStateOf(existing?.category ?: ItemCategory.FOOD_STAPLE) }
+    var unit by rememberSaveable(key = "${draftKey}_unit") { mutableStateOf(existing?.unit ?: "piece") }
+    var quantity by rememberSaveable(key = "${draftKey}_quantity") { mutableStateOf(existing?.totalQuantity?.cleanNumber() ?: "") }
+    var price by rememberSaveable(key = "${draftKey}_price") { mutableStateOf(existing?.totalPrice?.cleanNumber() ?: "") }
+    var batchType by rememberSaveable(key = "${draftKey}_batchType", stateSaver = enumSaver<BatchType>()) { mutableStateOf(existing?.batchType ?: BatchType.WEEKLY) }
+    var usage by rememberSaveable(key = "${draftKey}_usage") { mutableStateOf(existing?.estimatedUsagePerDay?.cleanNumber() ?: "") }
+    var notes by rememberSaveable(key = "${draftKey}_notes") { mutableStateOf(existing?.notes.orEmpty()) }
+    var catalogId by rememberSaveable(key = "${draftKey}_catalogId") { mutableStateOf(existingCatalogId) }
+    var catalogItems by remember(existing?.id) { mutableStateOf(snapshot.foodCatalog) }
+    var catalogQuery by rememberSaveable(key = "${draftKey}_catalogQuery") { mutableStateOf("") }
+    var portionUnit by rememberSaveable(key = "${draftKey}_portionUnit") {
         mutableStateOf(snapshot.foodCatalog.firstOrNull { it.id == existingCatalogId }?.portionUnit ?: unit)
     }
-    var rememberForNextShop by remember(existingId) { mutableStateOf(false) }
+    var rememberForNextShop by rememberSaveable(key = "${draftKey}_remember") { mutableStateOf(false) }
     // What one package of *this batch* holds, in the food's base unit. It belongs to the
     // batch: buying a different package must not reinterpret food already in the kitchen.
-    var packageSizeInput by remember(existingId) {
+    var packageSizeInput by rememberSaveable(key = "${draftKey}_packageSize") {
         mutableStateOf(existing?.packageSize?.takeIf { it > 0.0 }?.cleanNumber() ?: "")
     }
     val parsedQuantity = quantity.asDouble()
@@ -111,7 +116,7 @@ fun StockFormSheet(
     SheetBody(
         title = if (existing == null) "Bought something" else "Edit stock item",
         subtitle = if (existing == null) null else "${existing.remainingQuantity.cleanNumber()} ${existing.unit} left • ${existing.daysLabel}",
-        onClose = onDismiss,
+        onClose = draft.dismiss,
     ) {
         if (existing?.isUsageEstimated == true && !existing.isFinished) {
             Surface(
@@ -214,15 +219,16 @@ fun StockFormSheet(
             if (selectedFood != null) {
                 val spoonsM = selectedFood.measurement as? FoodMeasurementType.SpoonsToGrams
                 if (spoonsM != null) {
-                    var buyMode by remember(selectedFood.id) {
+                    var buyMode by rememberSaveable(key = "${draftKey}_buyMode_${selectedFood.id}") {
                         mutableStateOf(if (unit == "g") "grams" else "jar")
                     }
                     val packageGramsDefault = (selectedFood.baseUnitsPerStockUnit.takeIf { it > 0 } ?: 380.0).cleanNumber()
 
                     Spacer(Modifier.height(8.dp))
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         FilterChip(
                             selected = buyMode == "jar",
@@ -338,14 +344,15 @@ fun StockFormSheet(
                 } else {
                     val hasGenericConversion = selectedFood.portionsPerStockUnit > 1.0 &&
                         !selectedFood.stockUnit.equals(selectedFood.portionUnit, ignoreCase = true)
-                    var buyInPortion by remember(selectedFood.id) {
+                    var buyInPortion by rememberSaveable(key = "${draftKey}_buyPortion_${selectedFood.id}") {
                         mutableStateOf(unit.equals(selectedFood.portionUnit, ignoreCase = true))
                     }
                     if (hasGenericConversion) {
                         Spacer(Modifier.height(8.dp))
-                        Row(
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             FilterChip(
                                 selected = !buyInPortion,
@@ -487,7 +494,7 @@ fun StockFormSheet(
         PrimaryButton(
             text = if (existing == null) "Save purchase" else "Save changes",
             onClick = {
-                if (submission.isSaving) return@PrimaryButton
+                if (draft.submission.isSaving) return@PrimaryButton
                 val food = catalogItems.firstOrNull { it.id == catalogId }
                 // Everything is stored in the food's base unit, using the batch's own package
                 // size when the user stated one. The catalog is never rewritten from here.
@@ -570,7 +577,7 @@ fun StockFormSheet(
                     packageSize = batchPackageSize,
                     conversionKnown = converted,
                 )
-                submission.submit { complete ->
+                draft.submission.submit { complete ->
                     if (existing == null) {
                         viewModel.recordPurchase(item, rememberForNextShop, onComplete = complete)
                     } else {
@@ -578,16 +585,16 @@ fun StockFormSheet(
                     }
                 }
             },
-            enabled = valid && !submission.isSaving,
+            enabled = valid && !draft.submission.isSaving,
             icon = AppIcons.Check,
         )
         if (existing != null) {
             OutlinedButton(
                 onClick = {
                     viewModel.deleteStock(existing)
-                    onDismiss()
+                    draft.dismiss()
                 },
-                enabled = !submission.isSaving,
+                enabled = !draft.submission.isSaving,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, ErrorBorder),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
@@ -657,6 +664,9 @@ fun UsageFormSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
+    val editorIdentity = "usage_${item.id}"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
     val catalog = snapshot.foodCatalog.firstOrNull { it.id == item.catalogId }
         ?: snapshot.foodCatalog.firstOrNull { it.name.equals(item.name, ignoreCase = true) }
     // Portions only exist when the food has a real conversion and this batch is stored in
@@ -664,18 +674,44 @@ fun UsageFormSheet(
     val perPortion = catalog?.baseUnitsPerPortion?.takeIf { it > 0.0 }
     val hasConversion = catalog != null && perPortion != null &&
         item.conversionKnown && Units.sameUnit(item.unit, catalog.baseUnit)
-    var usePortionUnit by remember(item.id) { mutableStateOf(hasConversion) }
-    var amount by remember(item.id, usePortionUnit) { mutableStateOf("") }
+    var usePortionUnit by rememberSaveable(key = "${draftKey}_usePortion") { mutableStateOf(hasConversion) }
+    var amount by rememberSaveable(key = "${draftKey}_amount") { mutableStateOf("") }
     val value = amount.asDouble()
-    val submission = rememberFormSubmission(onDismiss)
 
+    fun switchUnit(targetUsePortion: Boolean) {
+        if (usePortionUnit == targetUsePortion) return
+        if (amount.isNotBlank() && value > 0.0 && perPortion != null) {
+            val converted = if (targetUsePortion) {
+                value / perPortion
+            } else {
+                value * perPortion
+            }
+            amount = converted.cleanNumber()
+        } else {
+            amount = ""
+        }
+        usePortionUnit = targetUsePortion
+    }
+
+    val stockAmount = if (usePortionUnit && perPortion != null) {
+        value * perPortion
+    } else {
+        value
+    }
     val currentUnit = if (usePortionUnit) catalog?.portionUnit ?: item.unit else item.unit
     val remainingInCurrentUnit = if (usePortionUnit && perPortion != null) {
         item.remainingQuantity / perPortion
     } else {
         item.remainingQuantity
     }
-    val valid = value > 0.0 && value <= remainingInCurrentUnit + 0.001
+    val exceedsStock = stockAmount > item.remainingQuantity
+    val isPositive = stockAmount > 0.0
+    val valid = isPositive && !exceedsStock
+    val usageError = when {
+        amount.isNotBlank() && !isPositive -> "Usage amount must be greater than 0."
+        exceedsStock -> "Amount exceeds remaining stock (${remainingInCurrentUnit.cleanNumber()} $currentUnit). Enter an amount up to ${remainingInCurrentUnit.cleanNumber()}."
+        else -> null
+    }
 
     val convertedSubtitle = if (hasConversion) {
         catalog?.let { food ->
@@ -690,7 +726,7 @@ fun UsageFormSheet(
     val subtitle = convertedSubtitle
         ?: "${item.name} has ${item.remainingQuantity.cleanNumber()} ${item.unit} left · ${item.daysLabel}"
 
-    SheetBody("Log use", subtitle, onDismiss) {
+    SheetBody("Log use", subtitle, onClose = draft.dismiss) {
         if (item.isUsageEstimated && !item.isFinished) {
             Surface(
                 modifier = Modifier.padding(bottom = 8.dp),
@@ -717,15 +753,15 @@ fun UsageFormSheet(
             }
         }
         if (hasConversion) {
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 FilterChip(
                     selected = usePortionUnit,
-                    onClick = { usePortionUnit = true },
+                    onClick = { switchUnit(true) },
                     label = { Text("Use: ${catalog?.portionUnit ?: item.unit}") },
-                    modifier = Modifier.weight(1f),
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = AccentMint.copy(alpha = 0.2f),
                         selectedLabelColor = AccentMintLight,
@@ -733,9 +769,8 @@ fun UsageFormSheet(
                 )
                 FilterChip(
                     selected = !usePortionUnit,
-                    onClick = { usePortionUnit = false },
+                    onClick = { switchUnit(false) },
                     label = { Text("Stock: ${item.unit}") },
-                    modifier = Modifier.weight(1f),
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = AccentMint.copy(alpha = 0.2f),
                         selectedLabelColor = AccentMintLight,
@@ -744,28 +779,26 @@ fun UsageFormSheet(
             }
         }
         FormSectionTitle("Date")
-        var usageDate by remember { mutableStateOf(LocalDate.now()) }
-        Row(
+        var usageDate by rememberSaveable(key = "${draftKey}_date", stateSaver = localDateSaver) { mutableStateOf(LocalDate.now()) }
+        FlowRow(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilterChip(
                 selected = usageDate == LocalDate.now(),
                 onClick = { usageDate = LocalDate.now() },
                 label = { Text("Today") },
-                modifier = Modifier.weight(1f),
             )
             FilterChip(
                 selected = usageDate == LocalDate.now().minusDays(1),
                 onClick = { usageDate = LocalDate.now().minusDays(1) },
                 label = { Text("Yesterday") },
-                modifier = Modifier.weight(1f),
             )
             FilterChip(
                 selected = usageDate == LocalDate.now().minusDays(2),
                 onClick = { usageDate = LocalDate.now().minusDays(2) },
                 label = { Text("2 days ago") },
-                modifier = Modifier.weight(1f),
             )
         }
         FormSectionTitle("How much?")
@@ -787,34 +820,54 @@ fun UsageFormSheet(
             enabled = maxVal > 0.0,
             modifier = Modifier.fillMaxWidth(),
         )
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("0", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-            Text(useLabel, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-            Text(maxVal.cleanNumber(), style = MaterialTheme.typography.labelSmall, color = TextMuted)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("0", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                Text(maxVal.cleanNumber(), style = MaterialTheme.typography.labelSmall, color = TextMuted)
+            }
+            if (useLabel.isNotBlank()) {
+                Text(
+                    text = useLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                )
+            }
         }
-        NumberField(amount, { amount = it }, "Exact amount (optional)", prefix = "$currentUnit ")
+        NumberField(
+            value = amount,
+            onValueChange = { amount = it },
+            label = "Exact amount (optional)",
+            prefix = "$currentUnit ",
+            isError = usageError != null,
+            supportingText = if (usageError != null) ({ Text(usageError) }) else null,
+        )
         Spacer(Modifier.height(10.dp))
         val newRemaining = (remainingInCurrentUnit - value).coerceAtLeast(0.0)
-        val saveHint = if (valid) {
-            val portionForHint = if (usePortionUnit) perPortion else null
-            if (portionForHint != null) {
-                val newBase = (item.remainingQuantity - value * portionForHint).coerceAtLeast(0.0)
-                "New remaining: ${newRemaining.cleanNumber()} $currentUnit (→ ${newBase.cleanNumber()} ${item.unit})."
-            } else {
-                "New remaining: ${newRemaining.cleanNumber()} ${item.unit}. This helps the next estimate."
+        val saveHint = when {
+            usageError != null -> usageError
+            valid -> {
+                val portionForHint = if (usePortionUnit) perPortion else null
+                if (portionForHint != null) {
+                    val newBase = (item.remainingQuantity - value * portionForHint).coerceAtLeast(0.0)
+                    "New remaining: ${newRemaining.cleanNumber()} $currentUnit (→ ${newBase.cleanNumber()} ${item.unit})."
+                } else {
+                    "New remaining: ${newRemaining.cleanNumber()} ${item.unit}. This helps the next estimate."
+                }
             }
-        } else {
-            "Use a number up to ${remainingInCurrentUnit.cleanNumber()}."
+            else -> "Use a number up to ${remainingInCurrentUnit.cleanNumber()}."
         }
         AnimatedSaveHint(saveHint)
         Spacer(Modifier.height(18.dp))
         PrimaryButton("Save usage", {
-            val stockAmount = if (usePortionUnit && perPortion != null) {
-                value * perPortion
-            } else {
-                value
+            draft.submission.submit { complete ->
+                viewModel.logUsage(item, stockAmount, usageDate) { success ->
+                    complete(success)
+                }
             }
-            submission.submit { complete -> viewModel.logUsage(item, stockAmount, usageDate, complete) }
-        }, enabled = valid && !submission.isSaving, icon = AppIcons.Check)
+        }, enabled = valid && !draft.submission.isSaving, icon = AppIcons.Check)
     }
 }

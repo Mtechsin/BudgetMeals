@@ -52,28 +52,6 @@ For the one-time move from an app installed with an older key, verify a data bac
 
 Android's [app signing documentation](https://developer.android.com/studio/publish/app-signing) explains why updates must use the same signing identity.
 
-## Testing
-
-Run the automated unit test suite:
-
-```powershell
-.\run_tests.bat
-```
-
-or:
-
-```powershell
-.\gradlew.bat :app:testDebugUnitTest
-```
-
-With an Android device or emulator connected, run the isolated SQLite regression tests:
-
-```powershell
-.\gradlew.bat :app:connectedDebugAndroidTest
-```
-
-These tests use separate databases and preferences. To compile the device tests without a connected device, run `:app:assembleDebugAndroidTest`.
-
 ## Checks
 
 Build the debug APK and run Android lint:

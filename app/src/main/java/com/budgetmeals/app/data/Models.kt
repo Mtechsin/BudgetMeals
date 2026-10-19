@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.util.UUID
 
 enum class ItemCategory(val label: String, val icon: String) {
@@ -35,6 +36,12 @@ enum class MealStatus {
     PARTIAL,
     SKIPPED,
     UNRECORDED,
+}
+
+enum class MealMarker(val label: String) {
+    UNMARKED("Unmarked"),
+    ESSENTIAL("Essential"),
+    NICE("Nice"),
 }
 
 @Immutable
@@ -298,6 +305,7 @@ data class MealTemplate(
     val notes: String = "",
     val isCustom: Boolean = false,
     val components: List<MealComponent> = emptyList(),
+    val marker: MealMarker = MealMarker.UNMARKED,
 ) {
     val foodSummary: String
         get() = components.joinToString(", ") { "${it.quantity.cleanNumberForMeal()} ${it.unit} ${it.name}" }
@@ -327,6 +335,8 @@ data class Expense(
     val isCorrection: Boolean = false,
     val recurringScheduleId: String? = null,
     val isBudgetTransfer: Boolean = false,
+    val foodClassification: String? = null,
+    val notes: String = "",
 ) {
     val isMealExpense: Boolean
         get() = id.startsWith(MealSpending.EXPENSE_PREFIX)
@@ -345,6 +355,8 @@ data class MealLog(
     val foods: String = "",
     val status: MealStatus = MealStatus.EATEN,
     val components: List<MealComponent> = emptyList(),
+    val cashPaid: Double? = null,
+    val marker: MealMarker = MealMarker.UNMARKED,
 ) {
     val leftoverCost: Double
         get() = (cost - consumedCost).coerceAtLeast(0.0)
@@ -375,6 +387,7 @@ data class MealReconciliation(
     val template: MealTemplate,
     val consumedCost: Double,
     val status: MealStatus,
+    val cashPaid: Double? = null,
 )
 
 @Immutable
@@ -388,6 +401,7 @@ data class DailyMealPlan(
     val foods: String,
     val components: List<MealComponent> = emptyList(),
     val isCleared: Boolean = false,
+    val marker: MealMarker = MealMarker.UNMARKED,
 )
 
 @Immutable
@@ -433,6 +447,30 @@ enum class AppThemeMode(val label: String) {
 }
 
 @Immutable
+data class MealWindow(
+    val mealType: MealType,
+    val start: LocalTime,
+    val end: LocalTime,
+) {
+    val isOvernight: Boolean get() = end <= start
+
+    fun minuteSet(): Set<Int> {
+        val s = start.hour * 60 + start.minute
+        val e = end.hour * 60 + end.minute
+        return if (e > s) {
+            (s until e).toSet()
+        } else {
+            ((s until 1440) + (0 until e)).toSet()
+        }
+    }
+
+    fun contains(time: LocalTime): Boolean {
+        val m = time.hour * 60 + time.minute
+        return m in minuteSet()
+    }
+}
+
+@Immutable
 data class BudgetSettings(
     val monthlyFoodBudget: Double = 3_000.0,
     val dailyFoodBudget: Double = 100.0,
@@ -444,7 +482,43 @@ data class BudgetSettings(
     val shoppingDay: DayOfWeek = DayOfWeek.FRIDAY,
     val lastSparesAutoSaveDate: LocalDate? = null,
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
-)
+    val foodPreferences: String = "",
+    val foodExclusions: String = "",
+    val habitMessagesEnabled: Boolean = true,
+    val breakfastStart: LocalTime = LocalTime.of(6, 0),
+    val breakfastEnd: LocalTime = LocalTime.of(11, 0),
+    val lunchStart: LocalTime = LocalTime.of(12, 0),
+    val lunchEnd: LocalTime = LocalTime.of(17, 0),
+    val dinnerStart: LocalTime = LocalTime.of(18, 0),
+    val dinnerEnd: LocalTime = LocalTime.of(23, 0),
+) {
+    fun mealWindows(): List<MealWindow> = listOf(
+        MealWindow(MealType.BREAKFAST, breakfastStart, breakfastEnd),
+        MealWindow(MealType.LUNCH, lunchStart, lunchEnd),
+        MealWindow(MealType.DINNER, dinnerStart, dinnerEnd),
+    )
+
+    fun windowFor(mealType: MealType): MealWindow? = mealWindows().firstOrNull { it.mealType == mealType }
+
+    companion object {
+        fun validateWindows(
+            bStart: LocalTime, bEnd: LocalTime,
+            lStart: LocalTime, lEnd: LocalTime,
+            dStart: LocalTime, dEnd: LocalTime,
+        ): String? {
+            if (bStart == bEnd) return "Breakfast window cannot be zero length"
+            if (lStart == lEnd) return "Lunch window cannot be zero length"
+            if (dStart == dEnd) return "Dinner window cannot be zero length"
+            val b = MealWindow(MealType.BREAKFAST, bStart, bEnd).minuteSet()
+            val l = MealWindow(MealType.LUNCH, lStart, lEnd).minuteSet()
+            val d = MealWindow(MealType.DINNER, dStart, dEnd).minuteSet()
+            if (b.intersect(l).isNotEmpty()) return "Breakfast and Lunch windows overlap"
+            if (b.intersect(d).isNotEmpty()) return "Breakfast and Dinner windows overlap"
+            if (l.intersect(d).isNotEmpty()) return "Lunch and Dinner windows overlap"
+            return null
+        }
+    }
+}
 
 /** What a kitchen actually holds for one catalog food, and why lots were left out. */
 @Immutable

@@ -60,19 +60,23 @@ internal fun ShoppingFormSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
-    val itemId = rememberSaveable(existing?.id) { existing?.id ?: UUID.randomUUID().toString() }
-    var name by rememberSaveable { mutableStateOf(existing?.name.orEmpty()) }
-    var quantity by rememberSaveable { mutableStateOf(existing?.quantity?.cleanNumber() ?: "1") }
-    var unit by rememberSaveable { mutableStateOf(existing?.unit ?: "piece") }
-    var isPriceKnown by rememberSaveable { mutableStateOf(existing?.priceKnown ?: true) }
-    var price by rememberSaveable {
+    val editorIdentity = "shopping_${existing?.id ?: "new"}"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    val itemId = rememberSaveable(existing?.id, key = "${draftKey}_id") { existing?.id ?: UUID.randomUUID().toString() }
+    var name by rememberSaveable(key = "${draftKey}_name") { mutableStateOf(existing?.name.orEmpty()) }
+    var quantity by rememberSaveable(key = "${draftKey}_qty") { mutableStateOf(existing?.quantity?.cleanNumber() ?: "1") }
+    var unit by rememberSaveable(key = "${draftKey}_unit") { mutableStateOf(existing?.unit ?: "piece") }
+    var isPriceKnown by rememberSaveable(key = "${draftKey}_priceKnown") { mutableStateOf(existing?.priceKnown ?: true) }
+    var price by rememberSaveable(key = "${draftKey}_price") {
         mutableStateOf(
             existing?.let { if (it.priceKnown) it.estimatedPrice.cleanNumber() else "" } ?: ""
         )
     }
-    var category by rememberSaveable { mutableStateOf(existing?.category ?: ItemCategory.FOOD_STAPLE) }
-    var note by rememberSaveable { mutableStateOf(existing?.note.orEmpty()) }
-    val submission = rememberFormSubmission(onDismiss)
+    var category by rememberSaveable(key = "${draftKey}_cat", stateSaver = enumSaver<ItemCategory>()) {
+        mutableStateOf(existing?.category ?: ItemCategory.FOOD_STAPLE)
+    }
+    var note by rememberSaveable(key = "${draftKey}_note") { mutableStateOf(existing?.note.orEmpty()) }
 
     val catalogItems = snapshot?.foodCatalog.orEmpty()
     val normalizedQuery = name.trim().lowercase()
@@ -94,7 +98,7 @@ internal fun ShoppingFormSheet(
     SheetBody(
         title = if (existing == null) "Add to shopping" else "Edit item",
         subtitle = "Plan what to pick up in your next market run",
-        onClose = onDismiss,
+        onClose = draft.dismiss,
     ) {
         // 1. Food Catalog Suggestions
         if (matchingCatalogItems.isNotEmpty() && (existing == null || name.isBlank())) {
@@ -392,7 +396,7 @@ internal fun ShoppingFormSheet(
             onClick = {
                 val hasPrice = isPriceKnown && price.isNonNegativeNumber()
                 val finalPrice = if (hasPrice) parsedPrice else 0.0
-                submission.submit { complete ->
+                draft.submission.submit { complete ->
                     viewModel.saveShopping(
                         ShoppingItem(
                             id = itemId,
@@ -413,7 +417,7 @@ internal fun ShoppingFormSheet(
                     )
                 }
             },
-            enabled = isValid && !submission.isSaving,
+            enabled = isValid && !draft.submission.isSaving,
             icon = AppIcons.Check,
         )
 
@@ -422,9 +426,9 @@ internal fun ShoppingFormSheet(
             OutlinedButton(
                 onClick = {
                     viewModel.deleteShopping(existing)
-                    onDismiss()
+                    draft.dismiss()
                 },
-                enabled = !submission.isSaving,
+                enabled = !draft.submission.isSaving,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
                 colors = ButtonDefaults.outlinedButtonColors(
@@ -454,13 +458,15 @@ internal fun BuyShoppingSheet(
     viewModel: BudgetViewModel,
     onDismiss: () -> Unit,
 ) {
-    var price by remember(item.id) {
+    val editorIdentity = "buy_shopping_${item.id}"
+    val draft = rememberSheetDraft(editorIdentity, onDismiss)
+    val draftKey = draft.draftKey
+    var price by rememberSaveable(key = "${draftKey}_price") {
         mutableStateOf(
             if (item.priceKnown) item.estimatedPrice.cleanNumber() else ""
         )
     }
-    var rememberForNextShop by remember(item.id) { mutableStateOf(false) }
-    val submission = rememberFormSubmission(onDismiss)
+    var rememberForNextShop by rememberSaveable(key = "${draftKey}_nextShop") { mutableStateOf(false) }
 
     val parsedPrice = price.asDouble()
     val isValid = price.isNonNegativeNumber()
@@ -479,7 +485,7 @@ internal fun BuyShoppingSheet(
     SheetBody(
         title = "Buy ${item.name}",
         subtitle = "Mark item as purchased and add to pantry stock",
-        onClose = onDismiss,
+        onClose = draft.dismiss,
     ) {
         // 1. Item Summary Card
         SoftCard(
@@ -666,11 +672,13 @@ internal fun BuyShoppingSheet(
         PrimaryButton(
             text = if (isValid) "Confirm purchase · ${BudgetMath.money(parsedPrice)}" else "Confirm purchase",
             onClick = {
-                submission.submit { complete ->
-                    viewModel.buyShoppingItem(item, parsedPrice, rememberForNextShop, complete)
+                draft.submission.submit { complete ->
+                    viewModel.buyShoppingItem(item, parsedPrice, rememberForNextShop) { success ->
+                        complete(success)
+                    }
                 }
             },
-            enabled = isValid && !submission.isSaving,
+            enabled = isValid && !draft.submission.isSaving,
             icon = AppIcons.Check,
         )
     }
